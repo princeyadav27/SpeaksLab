@@ -1,0 +1,190 @@
+{
+  "categories": [
+    {
+      "id": "ai-engineering",
+      "name": "AI Engineering",
+      "blurb": "Build intelligent systems and understand how they work.",
+      "index": "01",
+      "subcategories": [
+        { "id": "ai-fundamentals", "name": "AI Fundamentals" },
+        { "id": "machine-learning", "name": "Machine Learning" },
+        { "id": "deep-learning", "name": "Deep Learning" },
+        { "id": "nlp", "name": "NLP" },
+        { "id": "rag", "name": "RAG" },
+        { "id": "llms", "name": "LLMs" },
+        { "id": "agents", "name": "Agents" },
+        { "id": "embeddings", "name": "Embeddings" },
+        { "id": "vector-databases", "name": "Vector Databases" },
+        { "id": "model-evaluation", "name": "Model Evaluation" },
+        { "id": "ai-system-design", "name": "AI System Design" }
+      ]
+    },
+    {
+      "id": "computer-science",
+      "name": "Computer Science",
+      "blurb": "The machinery beneath the software.",
+      "index": "02",
+      "subcategories": [
+        { "id": "data-structures", "name": "Data Structures" },
+        { "id": "algorithms", "name": "Algorithms" },
+        { "id": "operating-systems", "name": "Operating Systems" },
+        { "id": "computer-networks", "name": "Computer Networks" },
+        { "id": "databases", "name": "Databases" },
+        { "id": "distributed-systems", "name": "Distributed Systems" },
+        { "id": "computer-architecture", "name": "Computer Architecture" }
+      ]
+    },
+    {
+      "id": "machine-learning",
+      "name": "Machine Learning",
+      "blurb": "Learn from data. Make better predictions.",
+      "index": "03",
+      "subcategories": [
+        { "id": "supervised", "name": "Supervised Learning" },
+        { "id": "unsupervised", "name": "Unsupervised Learning" },
+        { "id": "evaluation", "name": "Evaluation" }
+      ]
+    },
+    {
+      "id": "deep-learning",
+      "name": "Deep Learning",
+      "blurb": "Neural networks that scale with complexity.",
+      "index": "04",
+      "subcategories": [
+        { "id": "architectures", "name": "Architectures" },
+        { "id": "optimization", "name": "Optimization" },
+        { "id": "transformers", "name": "Transformers" }
+      ]
+    },
+    {
+      "id": "nlp",
+      "name": "NLP",
+      "blurb": "Understanding, generating, and working with language.",
+      "index": "05",
+      "subcategories": [
+        { "id": "language-understanding", "name": "Language Understanding" },
+        { "id": "tokenization", "name": "Tokenization" },
+        { "id": "sequence-models", "name": "Sequence Models" }
+      ]
+    },
+    {
+      "id": "rag-llm",
+      "name": "RAG & LLM Systems",
+      "blurb": "Retrieve, reason, and generate with knowledge.",
+      "index": "06",
+      "subcategories": [
+        { "id": "retrieval", "name": "Retrieval" },
+        { "id": "generation", "name": "Generation" },
+        { "id": "evaluation", "name": "Evaluation" }
+      ]
+    },
+    {
+      "id": "system-design",
+      "name": "System Design",
+      "blurb": "Design systems that are scalable and reliable.",
+      "index": "07",
+      "subcategories": [
+        { "id": "scalability", "name": "Scalability" },
+        { "id": "reliability", "name": "Reliability" },
+        { "id": "data-systems", "name": "Data Systems" }
+      ]
+    },
+    {
+      "id": "software-engineering",
+      "name": "Software Engineering",
+      "blurb": "Build, test, and ship quality software.",
+      "index": "08",
+      "subcategories": [
+        { "id": "apis", "name": "APIs" },
+        { "id": "backend", "name": "Backend" },
+        { "id": "frontend", "name": "Frontend" },
+        { "id": "testing", "name": "Testing" },
+        { "id": "security", "name": "Security" },
+        { "id": "scalability", "name": "Scalability" },
+        { "id": "system-design", "name": "System Design" }
+      ]
+    },
+    {
+      "id": "finance",
+      "name": "Finance",
+      "blurb": "Markets, money, and financial systems.",
+      "index": "09",
+      "subcategories": [
+        { "id": "markets", "name": "Markets" },
+        { "id": "economics", "name": "Economics" },
+        { "id": "investing", "name": "Investing" },
+        { "id": "fintech", "name": "FinTech" },
+        { "id": "personal-finance", "name": "Personal Finance" }
+      ]
+    },
+    {
+      "id": "politics",
+      "name": "Politics",
+      "blurb": "Power, policy, and governance.",
+      "index": "10",
+      "subcategories": [
+        { "id": "institutions", "name": "Institutions" },
+        { "id": "public-policy", "name": "Public Policy" },
+        { "id": "elections", "name": "Elections" },
+        { "id": "political-economy", "name": "Political Economy" }
+      ]
+    },
+    {
+      "id": "geopolitics",
+      "name": "Geopolitics",
+      "blurb": "Nations, alliances, and global dynamics.",
+      "index": "11",
+      "subcategories": [
+        { "id": "international-relations", "name": "International Relations" },
+        { "id": "global-trade", "name": "Global Trade" },
+        { "id": "energy", "name": "Energy" },
+        { "id": "technology-competition", "name": "Technology Competition" },
+        { "id": "regional-conflicts", "name": "Regional Conflicts" }
+      ]
+    },
+    {
+      "id": "business",
+      "name": "Business",
+      "blurb": "Strategy, operations, and value creation.",
+      "index": "12",
+      "subcategories": [
+        { "id": "strategy", "name": "Strategy" },
+        { "id": "operations", "name": "Operations" },
+        { "id": "product", "name": "Product" }
+      ]
+    },
+    {
+      "id": "psychology",
+      "name": "Psychology",
+      "blurb": "Mind, behavior, and human nature.",
+      "index": "13",
+      "subcategories": [
+        { "id": "cognition", "name": "Cognition" },
+        { "id": "judgement", "name": "Judgement" },
+        { "id": "social", "name": "Social Psychology" }
+      ]
+    },
+    {
+      "id": "general-knowledge",
+      "name": "General Knowledge",
+      "blurb": "Ideas, history, and everything in between.",
+      "index": "14",
+      "subcategories": [
+        { "id": "science", "name": "Science" },
+        { "id": "history", "name": "History" },
+        { "id": "culture", "name": "Culture" }
+      ]
+    },
+    {
+      "id": "history",
+      "name": "History",
+      "blurb": "How the past was made, and why it still speaks.",
+      "index": "15",
+      "subcategories": [
+        { "id": "world", "name": "World History" },
+        { "id": "ideas", "name": "Ideas" },
+        { "id": "change", "name": "Change" }
+      ]
+    }
+  ]
+}

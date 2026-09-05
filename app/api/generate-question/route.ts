@@ -1,0 +1,225 @@
+﻿import { NextResponse } from "next/server";
+import { validateGeneratedQuestion } from "@/lib/generatedQuestion";
+import { pickTopic } from "@/lib/topicEngine";
+import type { TopicDifficulty } from "@/lib/topics";
+
+export const runtime = "nodejs";
+
+// ── Request shape ──────────────────────────────────────────────────────────
+
+type GenerateRequest = {
+  categoryId: string;
+  categoryName: string;
+  difficulty: TopicDifficulty;
+};
+
+const VALID_DIFFICULTIES: TopicDifficulty[] = ["easy", "medium", "hard"];
+
+// ── NVIDIA NIM endpoint (shared with /api/evaluate) ────────────────────────
+
+const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const NVIDIA_MODEL_CANDIDATES = (process.env.NVIDIA_MODEL ? [process.env.NVIDIA_MODEL] : [
+  "meta/llama-3.1-70b-instruct",
+  "meta/llama-3.2-11b-vision-instruct",
+  "meta/llama-3.1-8b-instruct",
+]);
+
+// â”€â”€ System prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function buildSystemPrompt(): string {
+  return `You are the question designer for "SpeakLab Topic Challenge", a speaking-practice tool that helps advanced English learners improve their technical understanding, reasoning, explanation ability, and interview communication.
+
+Your sole job is to generate a single original discussion question for the user to answer out loud.
+
+Topic priorities (when the user picks one of these categories):
+- AI Engineering: RAG, LLMs, NLP, machine learning, deep learning, AI agents, embeddings, vector search, model evaluation, AI system design, CS fundamentals (data structures, algorithms, OS, networks, distributed systems).
+- Computer Science: data structures, algorithms, operating systems, networking, databases, distributed systems, architecture, complexity.
+- Machine Learning / Deep Learning / NLP / RAG & LLM Systems: model families, training, evaluation, deployment, system tradeoffs.
+- System Design: scalability, reliability, consistency, data flow, tradeoffs.
+- Software Engineering: APIs, backend, frontend, testing, security, architecture.
+- For non-technical categories (Finance, Politics, Geopolitics, Business, Psychology, History, General Knowledge): prioritize clarity, structure, reasoning, and communication.
+
+Difficulty rules:
+- "easy": a single idea, concrete, suitable for short (60"“90s) answers.
+- "medium": two related ideas, requires an example or tradeoff, suitable for 90"“150s answers.
+- "hard": open-ended, requires reasoning and an argument, suitable for 2"“3 minute answers.
+
+Strict rules:
+1. Generate exactly ONE question.
+2. The question must be specific to the requested category. Do NOT generate a generic or off-topic question.
+3. The question must NOT be trivial, generic, or "what is X"-only at medium/hard. It must require real thinking and explanation.
+4. Do NOT repeat a well-known textbook question word-for-word; reframe it.
+5. Do NOT include any commentary, options, or extra text. Return ONLY a JSON object.
+6. Keep the question short (5"“14 words). Keep the prompt one to two sentences (â‰¤ 40 words).
+7. The JSON must use the exact required keys: question, category, difficulty, questionType.
+8. The category must exactly match the requested category id, using the same normalized value as the user selected.
+
+Required JSON structure (return ONLY this):
+{
+  "question": "<short question prompt, 5-14 words>",
+  "category": "<requested category id>",
+  "difficulty": "<easy|medium|hard>",
+  "questionType": "<concept|compare|why|tradeoff|design|opinion|problem-solving|interview>",
+  "prompt": "<one or two sentences telling the learner how to answer, 10-40 words>"
+}`;
+}
+
+// â”€â”€ User prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function buildUserPrompt(req: GenerateRequest): string {
+  return `CATEGORY: ${req.categoryName} (id: ${req.categoryId})
+DIFFICULTY: ${req.difficulty}
+
+Generate ONE Topic Challenge question appropriate for an English learner who chose this exact category and difficulty. Use the exact field names: question, category, difficulty, questionType, prompt. Return ONLY the JSON object.`;
+}
+
+// â”€â”€ JSON extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function extractJson(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end > start) return text.slice(start, end + 1);
+  return text.trim();
+}
+
+// â”€â”€ Route handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function getLocalQuestionFallback(categoryId: string, difficulty: TopicDifficulty) {
+  const localTopic = pickTopic(categoryId, difficulty)
+    ?? pickTopic(categoryId, "easy")
+    ?? pickTopic(categoryId, "medium")
+    ?? pickTopic(categoryId, "hard");
+
+  if (!localTopic) {
+    return null;
+  }
+
+  return validateGeneratedQuestion(localTopic, categoryId, difficulty);
+}
+
+export async function POST(request: Request) {
+  let body: GenerateRequest;
+  try {
+    body = (await request.json()) as GenerateRequest;
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) {
+    const localFallback = getLocalQuestionFallback(body.categoryId, body.difficulty);
+    return NextResponse.json(
+      localFallback ? { question: localFallback, source: "local" } : { error: "NVIDIA_API_KEY is not configured. Add it to .env.local." },
+      localFallback ? { status: 200 } : { status: 503 },
+    );
+  }
+
+  if (!body.categoryId || !body.categoryName) {
+    return NextResponse.json(
+      { error: "Missing required fields: categoryId, categoryName." },
+      { status: 400 },
+    );
+  }
+  if (!VALID_DIFFICULTIES.includes(body.difficulty)) {
+    return NextResponse.json(
+      { error: `Invalid difficulty: ${body.difficulty}` },
+      { status: 400 },
+    );
+  }
+
+  const systemPrompt = buildSystemPrompt();
+  const userPrompt = buildUserPrompt(body);
+
+  type NvidiaResponse = {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  let lastError = "All models failed or timed out.";
+
+  const fallbackQuestion = getLocalQuestionFallback(body.categoryId, body.difficulty);
+
+  for (const model of NVIDIA_MODEL_CANDIDATES) {
+    console.log(`[generate-question] Trying model: ${model}`);
+    let rawText: string;
+    try {
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), 30_000);
+      const res = await fetch(NVIDIA_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.7,
+          top_p: 0.9,
+          max_tokens: 600,
+          stream: false,
+        }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "");
+        console.warn(
+          `[generate-question] ${model} returned ${String(res.status)}:`,
+          errorText.slice(0, 120),
+        );
+        lastError = `NVIDIA returned ${String(res.status)}.${
+          res.status === 401 ? " Check NVIDIA_API_KEY."
+          : res.status === 429 ? " Rate limit, please wait."
+          : ""
+        }`;
+        continue;
+      }
+
+      const data = (await res.json()) as NvidiaResponse;
+      rawText = data.choices?.[0]?.message?.content ?? "";
+      if (!rawText) {
+        lastError = `${model} returned an empty response.`;
+        continue;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[generate-question] ${model} fetch error:`, msg);
+      lastError = msg.includes("AbortError") || msg.includes("abort")
+        ? `${model} timed out.`
+        : msg;
+      continue;
+    }
+
+    try {
+      const jsonText = extractJson(rawText);
+      const parsed: unknown = JSON.parse(jsonText);
+      const validated = validateGeneratedQuestion(
+        parsed,
+        body.categoryId,
+        body.difficulty,
+      );
+      console.log(
+        `[generate-question] Success with model: ${model}, id: ${validated.id}`,
+      );
+      return NextResponse.json({ question: validated, model });
+    } catch (err) {
+      console.warn(`[generate-question] ${model} parse/validate error:`, err);
+      console.warn(`[generate-question] Raw output:`, rawText.slice(0, 300));
+      lastError =
+        err instanceof Error ? `${model}: ${err.message}` : "Invalid JSON from model.";
+      continue;
+    }
+  }
+
+  console.error("[generate-question] All models failed. Last error:", lastError);
+  if (fallbackQuestion) {
+    return NextResponse.json({ question: fallbackQuestion, source: "local", fallback: true, model: "local-fallback" });
+  }
+  return NextResponse.json({ error: lastError }, { status: 502 });
+}
