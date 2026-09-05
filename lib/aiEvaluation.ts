@@ -19,6 +19,11 @@ export type AIEvaluation = {
     score: number;
     addressed: boolean;
     explanation: string;
+    /**
+     * False when no AI evaluation ran, so relevance could not be measured.
+     * Optional so evaluations saved before this field still validate.
+     */
+    assessed?: boolean;
   };
   scores: EvaluationScores;
   strengths: string[];
@@ -63,6 +68,9 @@ export function validateEvaluation(raw: unknown): AIEvaluation {
   if (typeof relevance.explanation !== "string" || relevance.explanation.trim() === "") {
     throw new Error("questionRelevance.explanation must be a non-empty string.");
   }
+  if (relevance.assessed !== undefined && typeof relevance.assessed !== "boolean") {
+    throw new Error("questionRelevance.assessed must be boolean when present.");
+  }
 
   const scores = obj.scores;
   if (typeof scores !== "object" || scores === null) {
@@ -100,6 +108,7 @@ export function validateEvaluation(raw: unknown): AIEvaluation {
       score: relevance.score as number,
       addressed: relevance.addressed as boolean,
       explanation: relevance.explanation as string,
+      assessed: typeof relevance.assessed === "boolean" ? relevance.assessed : true,
     },
     scores: {
       fluency: s.fluency as number,

@@ -98,14 +98,18 @@ function normalise(token: string): string {
   return token.replace(/^[^a-z0-9']+|[^a-z0-9']+$/gi, "").toLowerCase();
 }
 
-/** Count whole-word (or whole-phrase) occurrences of `needle` in `text`. */
-function countWholeWord(text: string, needle: string): number {
-  // Build a regex: word-boundary before the first word, after the last word.
-  // For multi-word phrases the spaces are treated literally.
+/**
+ * Whole-word (or whole-phrase) matcher for a filler entry.
+ * Word boundary before the first word and after the last word; for multi-word
+ * phrases the spaces are matched literally.
+ */
+function fillerPattern(needle: string): RegExp {
   const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`\\b${escaped}\\b`, "gi");
-  return (text.match(pattern) ?? []).length;
+  return new RegExp(`\\b${escaped}\\b`, "gi");
 }
+
+/** Sentinel that replaces a consumed match. It cannot form a word boundary. */
+const CONSUMED = "\u0000";
 
 // ─── Main export ─────────────────────────────────────────────────────────────
 
@@ -148,11 +152,17 @@ export function calculateMetrics(
   const fillerEntries: FillerWordEntry[] = [];
   let fillerWordCount = 0;
 
+  // FILLER_WORDS is ordered longest-phrase-first, so a phrase is consumed
+  // before its own sub-words are tested. Without consuming, "sort of" would be
+  // counted once as "sort of" and again as "sort", inflating the penalty.
+  let working = lower;
   for (const filler of FILLER_WORDS) {
-    const count = countWholeWord(lower, filler);
+    const pattern = fillerPattern(filler);
+    const count = (working.match(pattern) ?? []).length;
     if (count > 0) {
       fillerEntries.push({ word: filler, count });
       fillerWordCount += count;
+      working = working.replace(pattern, CONSUMED);
     }
   }
 

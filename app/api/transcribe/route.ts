@@ -5,34 +5,87 @@ export const runtime = "nodejs";
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const TRANSCRIPTION_TIMEOUT_MS = 5 * 60 * 1000;
 
+/**
+ * The uploaded bytes are not decodable audio. That is the client's file, not a
+ * missing server dependency, so it must not be reported as "install Whisper".
+ */
+class AudioDecodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AudioDecodeError";
+  }
+}
+
 export async function POST(request: Request) {
+  // Parse the multipart body separately: a malformed request is a client
+  // error (400), not a missing-dependency server error (500).
+  let formData: FormData;
   try {
-    const formData = await request.formData();
-    const file = formData.get("file");
-
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "No audio/video file was provided." }, { status: 400 });
-    }
-    if (file.size === 0) {
-      return NextResponse.json({ error: "The uploaded file is empty." }, { status: 400 });
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json({ error: "The recording is larger than 25 MB." }, { status: 413 });
-    }
-
-    const transcript = await transcribeWithLocalWhisper(
-      Buffer.from(await file.arrayBuffer()),
-      file.type,
-      file.name,
+    formData = await request.formData();
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: `Expected a multipart/form-data upload with a "file" field. ${
+          error instanceof Error ? error.message : ""
+        }`.trim(),
+      },
+      { status: 400 },
     );
+  }
 
-    return NextResponse.json({ transcript, model: process.env.WHISPER_MODEL ?? "small.en" });
+  const file = formData.get("file");
+  if (!(file instanceof File)) {
+    return NextResponse.json(
+      { error: 'No audio/video file was provided. Send it as a "file" field.' },
+      { status: 400 },
+    );
+  }
+  if (file.size === 0) {
+    return NextResponse.json({ error: "The uploaded file is empty." }, { status: 400 });
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    return NextResponse.json({ error: "The recording is larger than 25 MB." }, { status: 413 });
+  }
+
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(await file.arrayBuffer());
+  } catch (error) {
+    return NextResponse.json(
+      { error: `The upload could not be read. ${error instanceof Error ? error.message : ""}`.trim() },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const transcript = await transcribeWithLocalWhisper(buffer, file.type, file.name);
+    return NextResponse.json({
+      transcript,
+      model: process.env.WHISPER_MODEL ?? "small.en",
+    });
   } catch (error) {
     console.error("Transcription error:", error);
     const message = error instanceof Error ? error.message : "Unknown transcription error.";
+
+    // A corrupt upload is a client error, not a toolchain problem.
+    if (error instanceof AudioDecodeError) {
+      return NextResponse.json(
+        { error: `The recording could not be decoded as audio. Try re-recording. ${message}` },
+        { status: 400 },
+      );
+    }
+
+    // Only claim a missing toolchain when that is actually what happened;
+    // otherwise surface the real reason.
+    const missingTool = /ENOENT|Whisper is unavailable|not on PATH/.test(message);
+    const status = missingTool ? 503 : 500;
     return NextResponse.json(
-      { error: `Transcription failed. Install Whisper and FFmpeg, then try again. ${message}` },
-      { status: 500 },
+      {
+        error: missingTool
+          ? `Transcription is unavailable on this server. Install Whisper and FFmpeg, then try again. ${message}`
+          : `Transcription failed. ${message}`,
+      },
+      { status },
     );
   }
 }
@@ -74,7 +127,12 @@ async function transcribeWithLocalWhisper(
         "-y", "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wavPath,
       ], { timeout: 60_000, maxBuffer: 2 * 1024 * 1024 });
     } catch (error) {
-      throw new Error(`FFmpeg could not decode the recording: ${error instanceof Error ? error.message : String(error)}`);
+      const detail = error instanceof Error ? error.message : String(error);
+      if (/ENOENT|not found|No such file/i.test(detail)) {
+        // FFmpeg itself is missing - a server dependency problem.
+        throw new Error(`FFmpeg is not installed or not on PATH. ${detail}`);
+      }
+      throw new AudioDecodeError(`FFmpeg could not decode the recording: ${detail}`);
     }
 
     await new Promise<void>((resolve, reject) => {

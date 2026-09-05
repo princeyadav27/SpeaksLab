@@ -4,11 +4,16 @@ export type TopicChallengeStep = "category" | "spin";
 export type TopicDifficulty = "easy" | "medium" | "hard";
 export type TopicMode = "random";
 
+/** How many recently landed topics to remember so spins do not repeat. */
+export const TOPIC_HISTORY_LIMIT = 20;
+
 export type TopicChallengeSnapshot = {
   categoryId: string | null;
   difficulty: TopicDifficulty;
   mode: TopicMode;
   topicId: string | null;
+  /** Ids of recently landed topics, most recent last. Used to avoid repeats. */
+  history: string[];
   step: TopicChallengeStep;
 };
 
@@ -17,6 +22,7 @@ export const emptyTopicChallengeSnapshot: TopicChallengeSnapshot = {
   difficulty: "hard",
   mode: "random",
   topicId: null,
+  history: [],
   step: "category",
 };
 
@@ -68,6 +74,11 @@ export function readTopicChallengeState(): TopicChallengeSnapshot {
       difficulty,
       mode: "random",
       topicId: typeof parsed.topicId === "string" ? parsed.topicId : null,
+      history: Array.isArray(parsed.history)
+        ? parsed.history
+            .filter((id): id is string => typeof id === "string")
+            .slice(-TOPIC_HISTORY_LIMIT)
+        : [],
       step: parsed.step === "spin" ? "spin" : "category",
     };
     lastSnapshotRaw = raw;

@@ -16,6 +16,7 @@ import {
   emptyTopicChallengeSnapshot,
   readTopicChallengeState,
   subscribeTopicChallenge,
+  TOPIC_HISTORY_LIMIT,
   writeTopicChallengeState,
 } from "@/lib/topicChallengeState";
 import TopicWheel from "./TopicWheel";
@@ -24,6 +25,7 @@ import {
   deleteRecording,
   type SavedRecording,
 } from "@/lib/recordingsDb";
+import RecordingPlayback from "@/components/recordings/RecordingPlayback";
 import {
   CategoryIcon,
   CheckIcon,
@@ -65,19 +67,27 @@ function cubicBezierComponent(t: number, first: number, second: number) {
   return 3 * inverse * inverse * t * first + 3 * inverse * t * t * second + t * t * t;
 }
 
+// cubic-bezier(0.25, 0.1, 0.25, 1) — the CSS `ease` curve.
+//
+// The previous curve, cubic-bezier(0.12, 0.7, 0.18, 1), front-loaded the spin
+// so aggressively that ~89% of the rotation happened in the first 40% of the
+// animation. The question text therefore stopped changing at ~60% while the
+// wheel was still visibly turning for another second, which read as the text
+// and the wheel being out of sync. This curve keeps a clear deceleration but
+// spreads the rotation across the whole duration.
 function cubicBezierProgress(t: number) {
   let lower = 0;
   let upper = 1;
   let sample = t;
 
-  for (let iteration = 0; iteration < 12; iteration += 1) {
-    const x = cubicBezierComponent(sample, 0.12, 0.18);
+  for (let iteration = 0; iteration < 20; iteration += 1) {
+    const x = cubicBezierComponent(sample, 0.25, 0.25);
     if (x < t) lower = sample;
     else upper = sample;
     sample = (lower + upper) / 2;
   }
 
-  return cubicBezierComponent(sample, 0.7, 1);
+  return cubicBezierComponent(sample, 0.1, 1);
 }
 
 export default function SpinExperience() {
@@ -231,12 +241,14 @@ export default function SpinExperience() {
     categoryId?: string | null;
     difficulty?: TopicDifficulty;
     topicId?: string | null;
+    history?: string[];
   }) {
     writeTopicChallengeState({
       categoryId,
       difficulty,
       mode: "random",
       topicId: finalTopic?.id ?? stored.topicId,
+      history: stored.history,
       step: "spin",
       ...partial,
     });
@@ -403,8 +415,15 @@ export default function SpinExperience() {
 
   function spin() {
     if (spinning) return;
-    const previousTopicId = finalTopic?.id ?? stored.topicId;
-    const fallbackTopic = pickTopic(categoryId, difficulty, previousTopicId);
+    // Recently landed topics, so each spin lands on a new question. Older
+    // snapshots stored only the last topic; fall back to that when history
+    // is empty so the first spin after an upgrade still changes.
+    const landedId = finalTopic?.id ?? stored.topicId;
+    const recentTopicIds =
+      stored.history.length > 0 ? stored.history : landedId ? [landedId] : [];
+    const nextHistory = (id: string) =>
+      [...recentTopicIds, id].slice(-TOPIC_HISTORY_LIMIT);
+    const fallbackTopic = pickTopic(categoryId, difficulty, recentTopicIds);
     if (!fallbackTopic) {
       setRecordError(
         `No questions available for ${category?.name ?? "this category"} at ${difficulty} difficulty. Please try a different difficulty or category.`
@@ -427,11 +446,16 @@ export default function SpinExperience() {
       setPreview(chosen);
       setFinalTopic(chosen);
       setSpinning(false);
-      persist({ topicId: chosen.id, categoryId, difficulty });
+      persist({
+        topicId: chosen.id,
+        categoryId,
+        difficulty,
+        history: nextHistory(chosen.id),
+      });
       return;
     }
 
-    const sequence = buildSpinSequence(categoryId, difficulty, chosen, 18);
+    const sequence = buildSpinSequence(chosen, 18);
     setPreview(sequence[0] ?? chosen);
     const startRotation = rotation;
     const totalRotation = 720 + Math.floor(Math.random() * 180);
@@ -442,9 +466,12 @@ export default function SpinExperience() {
     const animate = (now: number) => {
       const rawProgress = Math.min(1, (now - startedAt) / duration);
       const progress = cubicBezierProgress(rawProgress);
+      // round(), not floor(): the bisection converges to ~0.99999995 at t=1,
+      // so floor() could never select the final slot during the animation and
+      // the landing question only appeared via the completion branch below.
       const index = Math.min(
         sequence.length - 1,
-        Math.floor(progress * (sequence.length - 1)),
+        Math.round(progress * (sequence.length - 1)),
       );
 
       setRotation(startRotation + totalRotation * progress);
@@ -460,7 +487,12 @@ export default function SpinExperience() {
         setFinalTopic(landedTopic);
         setSpinning(false);
         spinFrameRef.current = null;
-        persist({ topicId: landedTopic.id, categoryId, difficulty });
+        persist({
+          topicId: landedTopic.id,
+          categoryId,
+          difficulty,
+          history: nextHistory(landedTopic.id),
+        });
         return;
       }
 
@@ -663,6 +695,7 @@ export default function SpinExperience() {
         categoryName,
         difficulty,
         prepMinutes: prepMinutes ?? 0,
+        notes: notes.trim() ? notes.trim() : undefined,
         durationSeconds: recordingDuration,
         createdAt: new Date().toISOString(),
         blob,
@@ -1273,11 +1306,17 @@ export default function SpinExperience() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {recording.blob.type.includes("video") ? (
-                      <video src={URL.createObjectURL(recording.blob)} controls className="h-16 w-20 rounded-lg object-cover" />
-                    ) : (
-                      <audio src={URL.createObjectURL(recording.blob)} controls className="h-10" />
-                    )}
+                    {/* RecordingPlayback owns and revokes its own object URL.
+                        Creating the URL inline here leaked one per recording on
+                        every render — and a spin re-renders ~60x/second. */}
+                    <RecordingPlayback
+                      recording={recording}
+                      className={
+                        recording.blob.type.includes("video")
+                          ? "h-16 w-20 rounded-lg object-cover"
+                          : "h-10"
+                      }
+                    />
                     <button
                       type="button"
                       onClick={() => void handleDeleteRecording(recording.id)}

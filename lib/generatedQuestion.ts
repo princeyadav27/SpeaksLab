@@ -64,11 +64,16 @@ function normalizeCategoryValue(raw: string, expectedCategoryId: string): string
  * Throws on any invalid field. The categoryId is forced to the
  * `expectedCategoryId` so a misbehaving model can't put a question into
  * the wrong category. Difficulty is also clamped to the requested level.
+ *
+ * `source` records where the question really came from. It defaults to "ai"
+ * but MUST be passed as "local" when a catalog topic is run through this
+ * validator — otherwise the local fallback reports itself as AI-generated.
  */
 export function validateGeneratedQuestion(
   raw: unknown,
   expectedCategoryId: string,
   expectedDifficulty: TopicDifficulty,
+  source: GeneratedQuestion["source"] = "ai",
 ): GeneratedQuestion {
   if (typeof raw !== "object" || raw === null) {
     throw new Error("Response is not a JSON object.");
@@ -146,6 +151,6 @@ export function validateGeneratedQuestion(
     type,
     estimatedMinutes:
       difficulty === "easy" ? 1 : difficulty === "medium" ? 2 : 3,
-    source: "ai",
+    source,
   };
 }

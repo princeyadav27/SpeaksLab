@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { validateGeneratedQuestion } from "@/lib/generatedQuestion";
 import { pickTopic } from "@/lib/topicEngine";
 import type { TopicDifficulty } from "@/lib/topics";
@@ -24,7 +24,7 @@ const NVIDIA_MODEL_CANDIDATES = (process.env.NVIDIA_MODEL ? [process.env.NVIDIA_
   "meta/llama-3.1-8b-instruct",
 ]);
 
-// â”€â”€ System prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── System prompt ─────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(): string {
   return `You are the question designer for "SpeakLab Topic Challenge", a speaking-practice tool that helps advanced English learners improve their technical understanding, reasoning, explanation ability, and interview communication.
@@ -40,9 +40,9 @@ Topic priorities (when the user picks one of these categories):
 - For non-technical categories (Finance, Politics, Geopolitics, Business, Psychology, History, General Knowledge): prioritize clarity, structure, reasoning, and communication.
 
 Difficulty rules:
-- "easy": a single idea, concrete, suitable for short (60"“90s) answers.
-- "medium": two related ideas, requires an example or tradeoff, suitable for 90"“150s answers.
-- "hard": open-ended, requires reasoning and an argument, suitable for 2"“3 minute answers.
+- "easy": a single idea, concrete, suitable for short (60–90s) answers.
+- "medium": two related ideas, requires an example or tradeoff, suitable for 90–150s answers.
+- "hard": open-ended, requires reasoning and an argument, suitable for 2–3 minute answers.
 
 Strict rules:
 1. Generate exactly ONE question.
@@ -50,7 +50,7 @@ Strict rules:
 3. The question must NOT be trivial, generic, or "what is X"-only at medium/hard. It must require real thinking and explanation.
 4. Do NOT repeat a well-known textbook question word-for-word; reframe it.
 5. Do NOT include any commentary, options, or extra text. Return ONLY a JSON object.
-6. Keep the question short (5"“14 words). Keep the prompt one to two sentences (â‰¤ 40 words).
+6. Keep the question short (5–14 words). Keep the prompt one to two sentences (≤ 40 words).
 7. The JSON must use the exact required keys: question, category, difficulty, questionType.
 8. The category must exactly match the requested category id, using the same normalized value as the user selected.
 
@@ -64,7 +64,7 @@ Required JSON structure (return ONLY this):
 }`;
 }
 
-// â”€â”€ User prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── User prompt ───────────────────────────────────────────────────────────────
 
 function buildUserPrompt(req: GenerateRequest): string {
   return `CATEGORY: ${req.categoryName} (id: ${req.categoryId})
@@ -73,7 +73,7 @@ DIFFICULTY: ${req.difficulty}
 Generate ONE Topic Challenge question appropriate for an English learner who chose this exact category and difficulty. Use the exact field names: question, category, difficulty, questionType, prompt. Return ONLY the JSON object.`;
 }
 
-// â”€â”€ JSON extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── JSON extraction ───────────────────────────────────────────────────────────
 
 function extractJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -84,7 +84,7 @@ function extractJson(text: string): string {
   return text.trim();
 }
 
-// â”€â”€ Route handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Route handler ─────────────────────────────────────────────────────────────
 
 function getLocalQuestionFallback(categoryId: string, difficulty: TopicDifficulty) {
   const localTopic = pickTopic(categoryId, difficulty)
@@ -96,7 +96,7 @@ function getLocalQuestionFallback(categoryId: string, difficulty: TopicDifficult
     return null;
   }
 
-  return validateGeneratedQuestion(localTopic, categoryId, difficulty);
+  return validateGeneratedQuestion(localTopic, categoryId, difficulty, "local");
 }
 
 export async function POST(request: Request) {
@@ -107,15 +107,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) {
-    const localFallback = getLocalQuestionFallback(body.categoryId, body.difficulty);
-    return NextResponse.json(
-      localFallback ? { question: localFallback, source: "local" } : { error: "NVIDIA_API_KEY is not configured. Add it to .env.local." },
-      localFallback ? { status: 200 } : { status: 503 },
-    );
-  }
-
+  // Validate the request BEFORE checking for an API key. Previously the
+  // no-key early return ran first, so malformed requests were answered with a
+  // misleading 503 "NVIDIA_API_KEY is not configured" (or silently downgraded
+  // to an easy question) instead of a 400 describing the actual problem.
   if (!body.categoryId || !body.categoryName) {
     return NextResponse.json(
       { error: "Missing required fields: categoryId, categoryName." },
@@ -126,6 +121,17 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: `Invalid difficulty: ${body.difficulty}` },
       { status: 400 },
+    );
+  }
+
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) {
+    const localFallback = getLocalQuestionFallback(body.categoryId, body.difficulty);
+    return NextResponse.json(
+      localFallback
+        ? { question: localFallback, source: "local", model: "local-catalog" }
+        : { error: `No local questions available for ${body.categoryId} at ${body.difficulty} difficulty.` },
+      localFallback ? { status: 200 } : { status: 404 },
     );
   }
 
