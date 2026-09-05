@@ -1,4 +1,5 @@
 import {
+  getTopics,
   getTopicsFor,
   type Topic,
   type TopicDifficulty,
@@ -13,35 +14,59 @@ function shuffle<T>(items: T[]): T[] {
   return copy;
 }
 
+/**
+ * Pick the topic the wheel will land on, from the selected category and
+ * difficulty only — the landing question always matches the user's choice.
+ *
+ * `excludedTopicIds` is the session history of recently landed topics. Those
+ * are skipped so consecutive spins keep producing a new question. If the
+ * history ever covers the whole pool the filter is relaxed rather than
+ * returning nothing, so a spin can never fail or block.
+ */
 export function pickTopic(
   categoryId: string,
   difficulty: TopicDifficulty,
-  excludedTopicId?: string | null,
+  excludedTopicIds?: readonly string[] | null,
 ): Topic | null {
   const pool = getTopicsFor({ categoryId, difficulty });
   if (pool.length === 0) return null;
 
-  const available = excludedTopicId
-    ? pool.filter((topic) => topic.id !== excludedTopicId)
+  const excluded = new Set(excludedTopicIds ?? []);
+  const available = excluded.size > 0
+    ? pool.filter((topic) => !excluded.has(topic.id))
     : pool;
   const candidates = available.length > 0 ? available : pool;
   return candidates[Math.floor(Math.random() * candidates.length)] ?? null;
 }
 
-export function buildSpinSequence(
-  categoryId: string,
-  difficulty: TopicDifficulty,
-  finalTopic: Topic,
-  length = 16,
-): Topic[] {
-  const filteredPool = getTopicsFor({ categoryId, difficulty });
-  const safePool = filteredPool.length > 0 ? filteredPool : [finalTopic];
+/**
+ * Build the list of topics the wheel cycles through while spinning.
+ *
+ * Decoys are drawn from the ENTIRE catalog rather than the selected
+ * category + difficulty. Most category/difficulty pools hold only one or two
+ * topics, so cycling that pool produced an 18-slot sequence where every entry
+ * was the same topic — the wheel turned and the ticks played, but the question
+ * text never changed and looked out of sync.
+ *
+ * `finalTopic` is excluded from the decoy pool, so the topic shown immediately
+ * before the wheel lands is always different from the one it lands on.
+ * Cycling a shuffled array by modulo also guarantees no two adjacent entries
+ * repeat while the pool has more than one topic.
+ *
+ * The landing topic is still chosen by `pickTopic(categoryId, difficulty)`,
+ * so the question the user actually answers always matches their selection.
+ */
+export function buildSpinSequence(finalTopic: Topic, length = 18): Topic[] {
+  const slots = Math.max(length, 2);
 
-  const others = shuffle(safePool);
+  const pool = getTopics().filter((topic) => topic.id !== finalTopic.id);
+  const candidates = pool.length > 0 ? pool : [finalTopic];
+
+  const ordered = shuffle(candidates);
   const sequence: Topic[] = [];
 
-  for (let i = 0; i < Math.max(length - 1, 1); i += 1) {
-    sequence.push(others[i % others.length]);
+  for (let i = 0; i < slots - 1; i += 1) {
+    sequence.push(ordered[i % ordered.length]);
   }
   sequence.push(finalTopic);
   return sequence;

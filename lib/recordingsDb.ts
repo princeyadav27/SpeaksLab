@@ -1,4 +1,4 @@
-﻿import type { SpeakingMetrics } from "./speakingMetrics";
+import type { SpeakingMetrics } from "./speakingMetrics";
 import type { AIEvaluation } from "./aiEvaluation";
 
 export type SavedRecording = {
@@ -10,6 +10,8 @@ export type SavedRecording = {
   categoryName: string;
   difficulty: string;
   prepMinutes: number;
+  /** Planning notes the learner typed during the prep timer, if any. */
+  notes?: string;
   durationSeconds: number;
   createdAt: string;
   blob: Blob;

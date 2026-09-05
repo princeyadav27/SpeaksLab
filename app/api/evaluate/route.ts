@@ -4,7 +4,7 @@ import type { SpeakingMetrics } from "@/lib/speakingMetrics";
 
 export const runtime = "nodejs";
 
-// â”€â”€ Request shape â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Request shape ─────────────────────────────────────────────────────────────
 
 type EvaluateRequest = {
   category: string;
@@ -17,7 +17,7 @@ type EvaluateRequest = {
   metrics: SpeakingMetrics;
 };
 
-// â”€â”€ NVIDIA NIM endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── NVIDIA NIM endpoint ───────────────────────────────────────────────────────
 
 const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 // Ordered by preference; first one that responds successfully is used.
@@ -28,7 +28,7 @@ const NVIDIA_MODEL_CANDIDATES = (process.env.NVIDIA_MODEL ? [process.env.NVIDIA_
   "meta/llama-3.1-8b-instruct",
 ]);
 
-// â”€â”€ System prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── System prompt ─────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(): string {
   return `You are an expert English speaking coach evaluating a learner's spoken response.
@@ -45,24 +45,24 @@ Ground every comment in the supplied transcript, topic, and speaking metrics. Gr
 If the transcript is too short or does not provide evidence for a category, say so clearly in the relevant array instead of inventing feedback.
 Technical feedback must address the actual topic and claims in the response, not generic coaching advice.
 First determine whether the transcript answers the exact challenge question. Explain which parts of the answer address or fail to address the question, and score that relevance separately. Do not rewrite, improve, or replace the challenge question.
-You MUST respond with ONLY valid JSON â€” no markdown fences, no commentary, no preamble.
+You MUST respond with ONLY valid JSON — no markdown fences, no commentary, no preamble.
 
-Evaluation dimensions (score 0â€“100 each):
+Evaluation dimensions (score 0–100 each):
 - fluency: natural flow, pace, and delivery (infer from transcript rhythm and filler words)
 - grammar: correctness of sentence structure
 - vocabulary: range and appropriateness of word choice
 - clarity: how clearly the ideas are expressed
-- structure: logical organisation â€” opening, body, conclusion
+- structure: logical organisation — opening, body, conclusion
 - technicalUnderstanding: depth of domain knowledge (weight heavily for technical topics; moderate for general)
 - reasoning: quality of arguments and logical thinking
 - communication: overall effectiveness as a communicator
 
 Scoring guidance:
-- 0â€“39: Poor. Major gaps, hard to follow.
-- 40â€“59: Developing. Some good moments but significant weaknesses.
-- 60â€“74: Competent. Mostly clear with noticeable weaknesses.
-- 75â€“89: Good. Clear, well-structured, minor issues.
-- 90â€“100: Excellent. Near-native fluency and depth.
+- 0–39: Poor. Major gaps, hard to follow.
+- 40–59: Developing. Some good moments but significant weaknesses.
+- 60–74: Competent. Mostly clear with noticeable weaknesses.
+- 75–89: Good. Clear, well-structured, minor issues.
+- 90–100: Excellent. Near-native fluency and depth.
 
 overallScore = weighted average of the 8 dimension scores (round to nearest integer).
 
@@ -86,21 +86,21 @@ Required JSON structure (return ONLY this, nothing else):
   },
   "strengths": [<2-3 specific, actionable strings>],
   "weaknesses": [<2-3 specific, actionable strings>],
-  "grammarCorrections": [<0-4 strings, each showing the error and the correction, e.g. "Said: X â†’ Should be: Y">],
-  "vocabularyImprovements": [<0-4 strings, each showing a weaker word and a stronger alternative, e.g. "good â†’ precise">],
+  "grammarCorrections": [<0-4 strings, each showing the error and the correction, e.g. "Said: X → Should be: Y">],
+  "vocabularyImprovements": [<0-4 strings, each showing a weaker word and a stronger alternative, e.g. "good → precise">],
   "technicalFeedback": [<0-4 strings of domain-specific feedback; empty array for non-technical topics>],
   "nextRecommendation": "<one specific, concrete action for the learner's next practice session>"
 }`;
 }
 
-// â”€â”€ User prompt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── User prompt ───────────────────────────────────────────────────────────────
 
 function buildUserPrompt(req: EvaluateRequest): string {
   const fillerSummary =
     req.metrics.fillerWordCount > 0
       ? req.metrics.fillerWords
           .slice(0, 5)
-          .map((f) => `"${f.word}" Ã—${f.count}`)
+          .map((f) => `"${f.word}" ×${f.count}`)
           .join(", ")
       : "none detected";
 
@@ -108,7 +108,7 @@ function buildUserPrompt(req: EvaluateRequest): string {
     req.metrics.repeatedWords.length > 0
       ? req.metrics.repeatedWords
           .slice(0, 5)
-          .map((r) => `"${r.word}" Ã—${r.count}`)
+          .map((r) => `"${r.word}" ×${r.count}`)
           .join(", ")
       : "none";
 
@@ -150,7 +150,7 @@ ${req.transcript.trim() || "(no speech detected)"}
 Evaluate this response and return ONLY the JSON object described in the system prompt.`;
 }
 
-// â”€â”€ JSON extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── JSON extraction ───────────────────────────────────────────────────────────
 
 /**
  * Extract the first complete JSON object from the model's raw text output.
@@ -255,9 +255,13 @@ function buildLocalEvaluationFallback(req: EvaluateRequest): AIEvaluation {
   return {
     overallScore,
     questionRelevance: {
+      // Score 0 with assessed:false means "not measured". The UI must not
+      // render this as a genuine 0/100 relevance score.
       score: 0,
       addressed: false,
-      explanation: "NVIDIA evaluation was unavailable, so question relevance could not be assessed.",
+      assessed: false,
+      explanation:
+        "AI evaluation was unavailable, so question relevance could not be measured. The dimension scores below are heuristic estimates from your speaking metrics only.",
     },
     scores,
     strengths,
@@ -269,43 +273,12 @@ function buildLocalEvaluationFallback(req: EvaluateRequest): AIEvaluation {
   };
 }
 
-// â”€â”€ Route handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
-  const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) {
-    let fallbackRequest: EvaluateRequest = {
-      category: "General",
-      challengeQuestion: "No challenge question provided.",
-      topicTitle: "General speaking task",
-      topicPrompt: "Respond clearly and confidently.",
-      topicType: "opinion",
-      difficulty: "medium",
-      transcript: "",
-      metrics: {
-        durationSeconds: 0,
-        wordCount: 0,
-        wordsPerMinute: null,
-        sentenceCount: 0,
-        fillerWordCount: 0,
-        fillerWords: [],
-        repeatedWords: [],
-      },
-    };
-
-    try {
-      fallbackRequest = (await request.clone().json()) as EvaluateRequest;
-    } catch {
-      // Fall back to a neutral, valid evaluation object.
-    }
-
-    const fallback = buildLocalEvaluationFallback(fallbackRequest);
-    return NextResponse.json(
-      { evaluation: fallback, source: "local-fallback", model: "local-fallback" },
-      { status: 200 },
-    );
-  }
-
+  // Parse and validate BEFORE the no-key early return. Otherwise a malformed
+  // request was answered with a 200 and a fabricated local-fallback score,
+  // and an empty transcript looked like a real evaluation.
   let body: EvaluateRequest;
   try {
     body = (await request.json()) as EvaluateRequest;
@@ -316,7 +289,7 @@ export async function POST(request: Request) {
   // Basic input validation
   if (!body.transcript || body.transcript.trim().length === 0) {
     return NextResponse.json(
-      { error: "Transcript is empty â€” nothing to evaluate." },
+      { error: "Transcript is empty — nothing to evaluate." },
       { status: 400 },
     );
   }
@@ -324,6 +297,15 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Missing required fields: topicTitle, category, or metrics." },
       { status: 400 },
+    );
+  }
+
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) {
+    const fallback = buildLocalEvaluationFallback(body);
+    return NextResponse.json(
+      { evaluation: fallback, source: "local-fallback", model: "local-fallback" },
+      { status: 200 },
     );
   }
 
@@ -373,7 +355,7 @@ export async function POST(request: Request) {
         console.warn(`[evaluate] ${model} returned ${String(nvidiaResponse.status)}:`, errorText.slice(0, 120));
         lastError = `NVIDIA API returned ${String(nvidiaResponse.status)}.${
           nvidiaResponse.status === 401 ? " Check NVIDIA_API_KEY."
-          : nvidiaResponse.status === 429 ? " Rate limit â€” please wait."
+          : nvidiaResponse.status === 429 ? " Rate limit — please wait."
           : ""
         }`;
         continue; // try next model

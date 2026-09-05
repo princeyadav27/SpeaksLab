@@ -59,6 +59,10 @@ function FeedbackSection({
 }
 
 export default function EvaluationDetails({ evaluation }: { evaluation: AIEvaluation }) {
+  // A local-fallback evaluation cannot measure relevance; showing 0/100 there
+  // would read as a real score of zero.
+  const notAssessed = evaluation.questionRelevance.assessed === false;
+
   return (
     <section className="mt-6 rounded-2xl border border-cobalt/15 bg-[#fbf7ef] p-4 sm:p-5">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-ink/10 pb-4">
@@ -91,11 +95,21 @@ export default function EvaluationDetails({ evaluation }: { evaluation: AIEvalua
       <section className="mt-6 rounded-xl border border-cobalt/20 bg-[#eef1fa] p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h4 className="text-[11px] font-medium uppercase tracking-[0.16em] text-cobalt">Question Relevance</h4>
-          <p className="font-display text-[1.2rem] text-cobalt">{evaluation.questionRelevance.score}<span className="font-sans text-[10px] text-ink/45"> / 100</span></p>
+          {notAssessed ? (
+            <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink/45">Not assessed</p>
+          ) : (
+            <p className="font-display text-[1.2rem] text-cobalt">{evaluation.questionRelevance.score}<span className="font-sans text-[10px] text-ink/45"> / 100</span></p>
+          )}
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/10"><div className="h-full rounded-full bg-cobalt" style={{ width: `${evaluation.questionRelevance.score}%` }} /></div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/10">
+          {notAssessed ? null : (
+            <div className="h-full rounded-full bg-cobalt" style={{ width: `${evaluation.questionRelevance.score}%` }} />
+          )}
+        </div>
         <p className="mt-3 text-[13px] leading-relaxed text-ink/75">{evaluation.questionRelevance.explanation}</p>
-        <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-ink/45">{evaluation.questionRelevance.addressed ? "Question addressed" : "Question not fully addressed"}</p>
+        {notAssessed ? null : (
+          <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-ink/45">{evaluation.questionRelevance.addressed ? "Question addressed" : "Question not fully addressed"}</p>
+        )}
       </section>
 
       <div className="mt-6 grid gap-3 lg:grid-cols-2">
