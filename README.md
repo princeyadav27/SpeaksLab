@@ -7,7 +7,12 @@ SpeakLab is a browser-based English speaking practice studio. It provides topic 
 - Topic-based speaking challenges with generated questions and follow-up prompts
 - Shadowing practice with curated video exercises
 - Browser recording and saved recording playback
-- Speech transcription through free, local Whisper (browser WebM/Ogg is normalized to 16 kHz mono WAV first)
+- Reliable speech transcription for short and long (10+ minute) recordings:
+  - hosted OpenAI-compatible Whisper API (e.g. Groq) — the zero-setup path
+    that works on hosted platforms like Vercel
+  - free local Whisper fallback when the API is not configured
+  - long recordings are decoded in the browser to 16 kHz mono WAV and split
+    into request-sized segments that are transcribed in order and merged
 - Speaking feedback through the NVIDIA NIM chat-completions API, with a deterministic local fallback when the API is unavailable
 - Local fallback questions when question generation is unavailable
 
@@ -15,8 +20,12 @@ SpeakLab is a browser-based English speaking practice studio. It provides topic 
 
 - Node.js 20 or newer
 - npm
-- Whisper installed and available on `PATH` for transcription features (free, local speech-to-text)
-- FFmpeg installed and available on `PATH` to decode browser recordings
+- For transcription on a hosted platform (e.g. Vercel), a free API key from
+  an OpenAI-compatible Whisper provider such as
+  [Groq](https://console.groq.com/) — nothing else to install
+- Alternatively, to run transcription fully locally: Whisper installed and
+  available on `PATH` (free, local speech-to-text) and FFmpeg on `PATH` to
+  decode non-WAV browser recordings
 - An NVIDIA API key for AI-generated questions and evaluation (optional; evaluation has a local fallback)
 
 ## Setup
@@ -33,11 +42,20 @@ SpeakLab is a browser-based English speaking practice studio. It provides topic 
 	NVIDIA_API_KEY=your_nvidia_api_key
 	# Optional: override the default NVIDIA model candidates.
 	NVIDIA_MODEL=your_model_name
-   # Optional: configure the free local Whisper executable and model.
-   WHISPER_BINARY=whisper
+
+	# Hosted transcription (recommended for Vercel): set the full endpoint and
+	# a key, e.g. Groq free tier (https://console.groq.com/):
+	WHISPER_API_URL=https://api.groq.com/openai/v1/audio/transcriptions
+	WHISPER_API_KEY=your_groq_api_key
+	# Optional overrides for the hosted API:
+	# WHISPER_MODEL=whisper-large-v3-turbo   (default when WHISPER_API_URL is set)
+	# WHISPER_LANGUAGE=en
+
+	# Alternative: free local Whisper. Used only when WHISPER_API_URL is NOT set.
+	WHISPER_BINARY=whisper
 	# small.en is the fast default; use large-v3 when maximum accuracy matters.
 	WHISPER_MODEL=small.en
-   WHISPER_LANGUAGE=en
+	WHISPER_LANGUAGE=en
 	```
 
 	Keep `.env.local` private. It is ignored by Git and must never be committed or published.
@@ -56,8 +74,15 @@ SpeakLab is a browser-based English speaking practice studio. It provides topic 
 | --- | --- |
 | `npm run dev` | Start the Next.js development server |
 | `npm run lint` | Run ESLint |
+| `npm run test` | Run the vitest regression suite |
 | `npm run build` | Create a production build |
 | `npm run start` | Serve the production build |
+
+## Regression safety
+
+Before changing anything in this repository, read
+[`REGRESSION_FIREWALL.md`](./REGRESSION_FIREWALL.md). After meaningful
+changes, run `npm test`, `npm run lint`, and `npm run build`.
 
 ## Routes
 

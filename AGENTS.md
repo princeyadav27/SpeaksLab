@@ -1,3 +1,18 @@
+# ⚠️ Read before changing anything in this repository
+
+**Any coding agent working on this repository MUST read
+`REGRESSION_FIREWALL.md` before making changes.**
+
+Core rule: **Fix forward without breaking backward.**
+
+- This is a shipped, hosted product with working functionality that must be
+  preserved.
+- Inspect before changing; reproduce before fixing; never do unrelated
+  refactoring; keep changes small and isolated.
+- Run `npm test`, `npm run lint`, and `npm run build` after meaningful changes.
+- Do not claim success (tests, production verification) without actually
+  performing it.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know

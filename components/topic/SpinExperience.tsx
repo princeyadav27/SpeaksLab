@@ -26,6 +26,7 @@ import {
   type SavedRecording,
 } from "@/lib/recordingsDb";
 import RecordingPlayback from "@/components/recordings/RecordingPlayback";
+import { transcribeRecording } from "@/lib/transcriptionClient";
 import {
   CategoryIcon,
   CheckIcon,
@@ -706,27 +707,17 @@ export default function SpinExperience() {
       setSavedRecordings((current) => [recording, ...current]);
       setTranscribingRecordingId(recording.id);
 
-      // Attempt transcription
-      const formData = new FormData();
-      const transcriptionExtension = blob.type.includes("ogg")
-        ? "ogg"
-        : blob.type.includes("mp4")
-          ? "mp4"
-          : "webm";
-      formData.append("file", blob, `recording.${transcriptionExtension}`);
-
-      const transcriptionResponse = await fetch("/api/transcribe", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (transcriptionResponse.ok) {
-        const transcriptionData = (await transcriptionResponse.json()) as { transcript?: string };
-        if (transcriptionData.transcript?.trim()) {
+      // Attempt transcription (raw upload when small; decode + chunk when the
+      // recording is large, e.g. a 10+ minute camera video).
+      try {
+        const transcript = await transcribeRecording(blob, {
+          onStatus: (message) => setSavedMessage(message),
+        });
+        if (transcript.trim()) {
           // Update recording with transcript
           const updatedRecording: SavedRecording = {
             ...recording,
-            transcript: transcriptionData.transcript,
+            transcript: transcript.trim(),
           };
           await saveRecording(updatedRecording);
           setSavedRecordings((current) =>
@@ -736,11 +727,12 @@ export default function SpinExperience() {
         } else {
           setSavedMessage("Recording saved, but transcription returned no speech.");
         }
-      } else {
-        const transcriptionData = (await transcriptionResponse.json().catch(() => null)) as { error?: string } | null;
-        setSavedMessage(
-          `Recording saved, but transcription failed: ${transcriptionData?.error ?? "the transcription service is unavailable."}`,
-        );
+      } catch (transcriptionError) {
+        const message =
+          transcriptionError instanceof Error
+            ? transcriptionError.message
+            : "the transcription service is unavailable.";
+        setSavedMessage(`Recording saved, but transcription failed: ${message}`);
       }
 
       setRecordState("hidden");
