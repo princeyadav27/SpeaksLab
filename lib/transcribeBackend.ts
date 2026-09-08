@@ -173,7 +173,7 @@ export async function transcribeWithApi(
     }
     return {
       ok: false,
-      status: 200,
+      status: 500,
       error: "No speech was detected in the recording.",
     };
   }

@@ -108,6 +108,7 @@ describe("transcribeWithApi", () => {
     const result = await transcribeWithApi(DEFAULT_FILE, DEFAULT_CONFIG);
     expect(result.ok).toBe(false);
     if (!result.ok) {
+      expect(result.status).toBe(500);
       expect(result.error).toContain("No speech was detected");
     }
   });
