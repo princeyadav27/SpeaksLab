@@ -112,6 +112,12 @@ describe("transcribeWithApi", () => {
     }
   });
 
+  it("allows empty transcripts for silent segments inside chunked recordings", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse(200, { text: "   " })));
+    const result = await transcribeWithApi(DEFAULT_FILE, { ...DEFAULT_CONFIG, allowEmpty: true });
+    expect(result).toEqual({ ok: true, transcript: "", model: "whisper-large-v3-turbo", source: "api" });
+  });
+
   it("treats non-JSON 2xx bodies as no-speech failures rather than crashing", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse(200, "<html>proxy</html>")));
     const result = await transcribeWithApi(DEFAULT_FILE, DEFAULT_CONFIG);

@@ -35,10 +35,19 @@ type AudioSegmentBlob = {
   blob: Blob;
 };
 
-/** Upload one file to /api/transcribe and return its transcript text. */
-async function postForTranscript(file: Blob, fileName: string): Promise<string> {
+/**
+ * Upload one file to /api/transcribe and return its transcript text.
+ * When `allowEmpty` is true, an empty result is a valid silent segment
+ * (inside a chunked long recording) and returns "" instead of failing.
+ */
+async function postForTranscript(
+  file: Blob,
+  fileName: string,
+  options: { allowEmpty?: boolean } = {},
+): Promise<string> {
   const formData = new FormData();
   formData.append("file", file, fileName);
+  if (options.allowEmpty) formData.append("allowEmpty", "1");
 
   const response = await fetch("/api/transcribe", {
     method: "POST",
@@ -50,10 +59,14 @@ async function postForTranscript(file: Blob, fileName: string): Promise<string> 
     error?: string;
   } | null;
 
-  if (!response.ok || !data?.transcript?.trim()) {
+  if (!response.ok) {
     throw new Error(data?.error ?? "Transcription failed.");
   }
-  return data.transcript.trim();
+  const text = (data?.transcript ?? "").trim();
+  if (!text && !options.allowEmpty) {
+    throw new Error(data?.error ?? "No speech was detected in the recording.");
+  }
+  return text;
 }
 
 /** Pick a sensible file name extension for the original recording. */
@@ -170,6 +183,7 @@ export async function transcribeRecording(
     const transcript = await postForTranscript(
       segment.blob,
       `audio-part-${segment.index + 1}.wav`,
+      { allowEmpty: true },
     );
     transcripts.push(transcript);
   }

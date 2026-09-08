@@ -48,6 +48,12 @@ export type ApiBackendConfig = {
   model: string;
   language?: string;
   timeoutMs: number;
+  /**
+   * When true, an empty transcript (a silent segment inside a longer,
+   * chunked recording) is a valid empty result instead of an error.
+   * Whole-recording silence should still surface as a no-speech error.
+   */
+  allowEmpty?: boolean;
 };
 
 export type ApiBackendFile = {
@@ -162,6 +168,9 @@ export async function transcribeWithApi(
 
   text = text.replace(/\s+/g, " ").trim();
   if (!text) {
+    if (config.allowEmpty) {
+      return { ok: true, transcript: "", model, source: "api" };
+    }
     return {
       ok: false,
       status: 200,
@@ -185,6 +194,7 @@ export async function transcribeWithLocalWhisper(
   buffer: Buffer,
   mimeType: string,
   originalName: string,
+  allowEmpty = false,
 ): Promise<TranscriptionResult> {
   const whisperBinary = process.env.WHISPER_BINARY ?? "whisper";
   const whisperModel = process.env.WHISPER_MODEL ?? "small.en";
@@ -257,7 +267,10 @@ export async function transcribeWithLocalWhisper(
     });
 
     const transcript = (await readFile(outputPath, "utf8")).replace(/\s+/g, " ").trim();
-    if (!transcript) throw new Error("No speech was detected in the recording.");
+    if (!transcript) {
+      if (allowEmpty) return { ok: true, transcript: "", model: whisperModel, source: "local" };
+      throw new Error("No speech was detected in the recording.");
+    }
     return { ok: true, transcript, model: whisperModel, source: "local" };
   } finally {
     await rm(tempDir, { recursive: true, force: true });

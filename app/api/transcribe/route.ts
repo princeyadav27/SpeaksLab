@@ -73,6 +73,12 @@ export async function POST(request: Request) {
   }
 
   const backend = selectBackend();
+  // Client marks segment uploads of a chunked long recording. A silent
+  // segment inside such a recording is a valid empty result; silence in a
+  // single whole-recording upload is still an error.
+  const rawAllowEmpty = formData.get("allowEmpty");
+  const allowEmpty =
+    rawAllowEmpty === "1" || rawAllowEmpty === "true";
 
   try {
     let result: TranscriptionResult;
@@ -91,13 +97,14 @@ export async function POST(request: Request) {
           mimeType: file.type,
           name: file.name,
         },
-        backend.config,
+        { ...backend.config, allowEmpty },
       );
     } else {
       result = await transcribeWithLocalWhisper(
         Buffer.from(uploadBytes),
         file.type,
         file.name,
+        allowEmpty,
       );
     }
 
