@@ -80,14 +80,14 @@ returns `{ transcript, model }` on success and `{ error }` otherwise.
   `whisper` + `ffmpeg` are installed on the server (`transcribeWithLocalWhisper`).
 - **Client pipeline** (`lib/transcriptionClient.ts`, used by the Topic
   Challenge save flow and the My Recordings page):
-  - Files ≤ 24 MB are uploaded **as-is** in one request (no decode).
+  - Files ≤ 4 MB are uploaded **as-is** in one request (no decode).
   - Larger files (long camera videos) have their audio track decoded in the
-    browser, normalized to **16 kHz mono WAV**, split into ≤ 12-minute
-    segments (~23 MB each), uploaded sequentially, and merged in order
+    browser, normalized to **16 kHz mono WAV**, split into bounded
+    segments (≤ 90 seconds / ~2.88 MB each), uploaded sequentially, and merged in order
     (`lib/transcriptionShared.ts`: `planWavChunks`, `wavBytesFromPcm16`,
     `mergeTranscriptChunks`).
 - **Tests**: `npm test` (vitest) covers chunk planning, WAV encoding, transcript
-  merging, backend selection, and provider error mapping in
+  merging, backend selection, provider error mapping, and local whisper WAV handling in
   `tests/transcriptionShared.test.ts` and `tests/transcribeBackend.test.ts`.
   Add tests whenever you change transcription logic.
 
@@ -99,5 +99,6 @@ returns `{ transcript, model }` on success and `{ error }` otherwise.
 | `WHISPER_API_KEY` | Bearer key for the hosted API |
 | `WHISPER_MODEL` | API mode default `whisper-large-v3-turbo`; local default `small.en` |
 | `WHISPER_LANGUAGE` | Default `en` |
+| `WHISPER_TIMEOUT_MS` | Optional request timeout in ms (default 300,000) |
 | `WHISPER_BINARY` | Local Whisper executable (local mode only) |
 | `NVIDIA_API_KEY` / `NVIDIA_MODEL` | AI question generation & evaluation |

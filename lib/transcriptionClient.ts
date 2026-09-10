@@ -1,13 +1,12 @@
 // Browser-side transcription pipeline used by the Topic Challenge flow and the
 // My Recordings page.
 //
-// Strategy (keeps provider 25 MB limits, memory, and latency in check):
+// Strategy (keeps provider 25 MB limits, serverless 4.5 MB limits, memory, and latency in check):
 // 1. Small enough to upload as-is?  -> send the original blob in ONE request
-//    (mic-only recordings are audio/webm|ogg|mp4 and usually fit; short
-//    camera videos often fit too). No decode, no re-encode: fastest path.
-// 2. Larger than that (e.g. a 10+ minute camera video)? -> decode the audio
+//    (short audio or small clips ≤ DIRECT_UPLOAD_BYTES fit; fastest path).
+// 2. Larger than that (e.g. a 3–10+ minute camera video)? -> decode the audio
 //    track in the browser, resample to Whisper-native 16 kHz mono, slice it
-//    into request-sized WAV segments (≤ 12 minutes each, ~23 MB), upload each
+//    into request-sized WAV segments (≤ 90 seconds each, ~2.88 MB), upload each
 //    segment sequentially, and merge the transcripts in order.
 //
 // The HTTP contract with /api/transcribe is unchanged:
@@ -15,6 +14,7 @@
 //   otherwise -> { error } (with a useful status).
 
 import {
+  MAX_UPLOAD_BYTES,
   TARGET_SAMPLE_RATE,
   mergeTranscriptChunks,
   planWavChunks,
@@ -99,7 +99,7 @@ async function extractWavSegments(blob: Blob): Promise<AudioSegmentBlob[]> {
     const arrayBuffer = await blob.arrayBuffer();
     let decoded: AudioBuffer;
     try {
-      decoded = await context.decodeAudioData(arrayBuffer);
+      decoded = await context.decodeAudioData(arrayBuffer.slice(0));
     } catch {
       throw new Error(
         "Your browser could not decode the audio track from this recording. Try re-recording with audio enabled, or use Chrome/Edge/Firefox.",
@@ -167,7 +167,18 @@ export async function transcribeRecording(
 
   // Long-recording path: extract + normalize audio, then chunked uploads.
   report("Preparing the recording for transcription…");
-  const segments = await extractWavSegments(blob);
+  let segments: AudioSegmentBlob[];
+  try {
+    segments = await extractWavSegments(blob);
+  } catch (extractError) {
+    // If browser audio decode fails (e.g. video container not decoded by Web Audio)
+    // but the file is within server provider limits, attempt direct upload fallback.
+    if (blob.size <= MAX_UPLOAD_BYTES) {
+      report("Transcribing…");
+      return postForTranscript(blob, `recording.${extensionFor(blob)}`);
+    }
+    throw extractError;
+  }
 
   if (segments.length === 0) {
     throw new Error("No audio was found in the recording.");

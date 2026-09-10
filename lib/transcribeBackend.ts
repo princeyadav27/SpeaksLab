@@ -210,25 +210,26 @@ export async function transcribeWithLocalWhisper(
   const tempDir = await mkdtemp(path.join(tmpdir(), "speaklab-whisper-"));
   const lowerName = originalName.toLowerCase();
   const isWav = /\.wav$/i.test(lowerName) || mimeType.includes("wav");
-  const inputExtension = isWav
-    ? "wav"
-    : mimeType.includes("ogg") || lowerName.endsWith(".ogg")
-      ? "ogg"
-      : mimeType.includes("mp4") || mimeType.includes("quicktime") || lowerName.endsWith(".mp4") || lowerName.endsWith(".mov")
-        ? "mp4"
-        : "webm";
-  const inputPath = path.join(tempDir, `input.${inputExtension}`);
   const wavPath = path.join(tempDir, "normalized.wav");
   const outputPath = path.join(tempDir, "normalized.txt");
 
   try {
-    await writeFile(inputPath, buffer);
+    if (isWav) {
+      await writeFile(wavPath, buffer);
+    } else {
+      const inputExtension =
+        mimeType.includes("ogg") || lowerName.endsWith(".ogg")
+          ? "ogg"
+          : mimeType.includes("mp4") || mimeType.includes("quicktime") || lowerName.endsWith(".mp4") || lowerName.endsWith(".mov")
+            ? "mp4"
+            : "webm";
+      const inputPath = path.join(tempDir, `input.${inputExtension}`);
+      await writeFile(inputPath, buffer);
 
-    if (!isWav) {
       try {
         await execFileAsync("ffmpeg", [
           "-y", "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wavPath,
-        ], { timeout: 60_000, maxBuffer: 2 * 1024 * 1024 });
+        ], { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         if (/ENOENT|not found|No such file/i.test(detail)) {
@@ -241,7 +242,7 @@ export async function transcribeWithLocalWhisper(
 
     await new Promise<void>((resolve, reject) => {
       const child = spawn(/* turbopackIgnore: true */ whisperBinary, [
-        isWav ? inputPath : wavPath,
+        wavPath,
         "--model", whisperModel,
         "--output_format", "txt",
         "--output_dir", tempDir,
@@ -293,6 +294,9 @@ export function selectBackend(
 ): BackendSelection {
   const apiUrl = env.WHISPER_API_URL?.trim();
   if (apiUrl) {
+    const rawTimeout = env.WHISPER_TIMEOUT_MS?.trim();
+    const parsedTimeout = rawTimeout ? parseInt(rawTimeout, 10) : NaN;
+    const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 5 * 60 * 1000;
     return {
       kind: "api",
       config: {
@@ -300,7 +304,7 @@ export function selectBackend(
         apiKey: env.WHISPER_API_KEY ?? "",
         model: env.WHISPER_MODEL?.trim() || "whisper-large-v3-turbo",
         language: env.WHISPER_LANGUAGE?.trim() || "en",
-        timeoutMs: 5 * 60 * 1000,
+        timeoutMs,
       },
     };
   }

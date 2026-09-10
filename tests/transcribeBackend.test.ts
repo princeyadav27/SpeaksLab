@@ -1,9 +1,47 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
+import type { ChildProcess } from "node:child_process";
 import {
   selectBackend,
   transcribeWithApi,
+  transcribeWithLocalWhisper,
   type ApiBackendFile,
 } from "../lib/transcribeBackend";
+
+let mockSpawnArgs: { cmd: string; args: string[] } | null = null;
+let mockSpawnExitCode = 0;
+let mockSpawnError: Error | null = null;
+let mockTxtContent = "Transcribed from local wav.";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: (cmd: string, args: string[]) => {
+      mockSpawnArgs = { cmd, args };
+      const emitter = new EventEmitter() as ChildProcess;
+      emitter.stderr = new EventEmitter() as unknown as ChildProcess["stderr"];
+
+      if (mockSpawnError) {
+        setTimeout(() => emitter.emit("error", mockSpawnError), 5);
+        return emitter;
+      }
+
+      const outputDirIdx = args.indexOf("--output_dir");
+      const tempDir = args[outputDirIdx + 1];
+      if (tempDir) {
+        void fs.writeFile(`${tempDir}/normalized.txt`, mockTxtContent);
+      }
+
+      setTimeout(() => {
+        emitter.emit("exit", mockSpawnExitCode);
+      }, 5);
+
+      return emitter;
+    },
+  };
+});
 
 function exactArrayBuffer(text: string): ArrayBuffer {
   const encoded = new TextEncoder().encode(text);
@@ -36,6 +74,10 @@ function mockFetchResponse(status: number, body: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  mockSpawnArgs = null;
+  mockSpawnExitCode = 0;
+  mockSpawnError = null;
+  mockTxtContent = "Transcribed from local wav.";
 });
 
 describe("selectBackend", () => {
@@ -60,17 +102,19 @@ describe("selectBackend", () => {
     });
   });
 
-  it("honors WHISPER_MODEL and WHISPER_LANGUAGE overrides", () => {
+  it("honors WHISPER_MODEL, WHISPER_LANGUAGE, and WHISPER_TIMEOUT_MS overrides", () => {
     const selection = selectBackend({
       WHISPER_API_URL: "https://example.com/v1/audio/transcriptions",
       WHISPER_API_KEY: "k",
       WHISPER_MODEL: "whisper-large-v3",
       WHISPER_LANGUAGE: "hi",
+      WHISPER_TIMEOUT_MS: "60000",
     });
     expect(selection.kind).toBe("api");
     if (selection.kind === "api") {
       expect(selection.config.model).toBe("whisper-large-v3");
       expect(selection.config.language).toBe("hi");
+      expect(selection.config.timeoutMs).toBe(60000);
     }
   });
 });
@@ -101,6 +145,24 @@ describe("transcribeWithApi", () => {
     const file = form.get("file") as Blob;
     expect(file.type).toBe("audio/wav");
     expect(await file.text()).toBe("fake-audio-bytes");
+  });
+
+  it("handles short audio files cleanly", async () => {
+    const shortFile: ApiBackendFile = {
+      buffer: exactArrayBuffer("short-wav-bytes"),
+      mimeType: "audio/wav",
+      name: "recording.wav",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchResponse(200, { text: "Short test transcript." }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await transcribeWithApi(shortFile, DEFAULT_CONFIG);
+    expect(result).toEqual({
+      ok: true,
+      transcript: "Short test transcript.",
+      model: "whisper-large-v3-turbo",
+      source: "api",
+    });
   });
 
   it("reports empty transcripts as no-speech failures", async () => {
@@ -181,5 +243,51 @@ describe("transcribeWithApi", () => {
     vi.stubGlobal("fetch", fetchMock);
     await transcribeWithApi(DEFAULT_FILE, { ...DEFAULT_CONFIG, apiUrl: "https://api.example.com/v1/audio/transcriptions/" });
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe("https://api.example.com/v1/audio/transcriptions");
+  });
+});
+
+describe("transcribeWithLocalWhisper", () => {
+  it("passes normalized.wav to whisper CLI when input is already a WAV file (fixing output filename mismatch)", async () => {
+    const wavBuffer = Buffer.from("RIFF....WAVEfmt ");
+    const result = await transcribeWithLocalWhisper(wavBuffer, "audio/wav", "audio-part-1.wav");
+
+    expect(result).toEqual({
+      ok: true,
+      transcript: "Transcribed from local wav.",
+      model: "small.en",
+      source: "local",
+    });
+
+    expect(mockSpawnArgs).not.toBeNull();
+    const inputArg = mockSpawnArgs!.args[0];
+    expect(inputArg).toMatch(/normalized\.wav$/);
+  });
+
+  it("allows empty transcripts for silent segments when allowEmpty is true", async () => {
+    mockTxtContent = "   ";
+    const wavBuffer = Buffer.from("RIFF....WAVEfmt ");
+    const result = await transcribeWithLocalWhisper(wavBuffer, "audio/wav", "audio-part-1.wav", true);
+    expect(result).toEqual({
+      ok: true,
+      transcript: "",
+      model: "small.en",
+      source: "local",
+    });
+  });
+
+  it("throws error for silent segments when allowEmpty is false", async () => {
+    mockTxtContent = "   ";
+    const wavBuffer = Buffer.from("RIFF....WAVEfmt ");
+    await expect(
+      transcribeWithLocalWhisper(wavBuffer, "audio/wav", "audio-part-1.wav", false),
+    ).rejects.toThrow("No speech was detected in the recording.");
+  });
+
+  it("reports error when whisper exits with non-zero code", async () => {
+    mockSpawnExitCode = 1;
+    const wavBuffer = Buffer.from("RIFF....WAVEfmt ");
+    await expect(
+      transcribeWithLocalWhisper(wavBuffer, "audio/wav", "audio-part-1.wav"),
+    ).rejects.toThrow(/Whisper exited with code 1/);
   });
 });
