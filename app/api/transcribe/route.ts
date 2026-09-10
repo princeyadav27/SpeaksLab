@@ -9,6 +9,7 @@ import {
 import { MAX_UPLOAD_BYTES, formatBytes } from "@/lib/transcriptionShared";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 /**
  * Encode a backend result into the HTTP response the client expects.

@@ -18,27 +18,70 @@ describe("planWavChunks", () => {
     expect(planWavChunks(-5)).toEqual([]);
   });
 
-  it("keeps a 10-minute recording in a single chunk", () => {
-    const segments = planWavChunks(10 * 60);
-    expect(segments).toHaveLength(1);
-    expect(segments[0].start).toBe(0);
-    expect(segments[0].seconds).toBe(600);
+  it("handles short recordings in a single chunk", () => {
+    const segments10s = planWavChunks(10);
+    expect(segments10s).toHaveLength(1);
+    expect(segments10s[0]).toEqual({ start: 0, seconds: 10 });
+
+    const segments30s = planWavChunks(30);
+    expect(segments30s).toHaveLength(1);
+    expect(segments30s[0]).toEqual({ start: 0, seconds: 30 });
+
+    const segments60s = planWavChunks(60);
+    expect(segments60s).toHaveLength(1);
+    expect(segments60s[0]).toEqual({ start: 0, seconds: 60 });
   });
 
   it("keeps a recording up to MAX_CHUNK_SECONDS in one chunk", () => {
-    expect(planWavChunks(MAX_CHUNK_SECONDS)).toHaveLength(1);
+    expect(planWavChunks(MAX_CHUNK_SECONDS)).toEqual([
+      { start: 0, seconds: MAX_CHUNK_SECONDS },
+    ]);
   });
 
-  it("splits a recording longer than MAX_CHUNK_SECONDS into bounded chunks", () => {
-    const totalSeconds = MAX_CHUNK_SECONDS + 90;
+  it("splits a 3-minute recording into bounded chunks", () => {
+    const totalSeconds = 3 * 60; // 180s
     const segments = planWavChunks(totalSeconds);
     expect(segments).toHaveLength(2);
-    expect(segments[0]).toEqual({ start: 0, seconds: MAX_CHUNK_SECONDS });
-    expect(segments[1]).toEqual({ start: MAX_CHUNK_SECONDS, seconds: 90 });
+    expect(segments[0]).toEqual({ start: 0, seconds: 90 });
+    expect(segments[1]).toEqual({ start: 90, seconds: 90 });
+  });
+
+  it("splits a 4-minute recording into bounded chunks", () => {
+    const totalSeconds = 4 * 60; // 240s
+    const segments = planWavChunks(totalSeconds);
+    expect(segments).toHaveLength(3);
+    expect(segments[0]).toEqual({ start: 0, seconds: 90 });
+    expect(segments[1]).toEqual({ start: 90, seconds: 90 });
+    expect(segments[2]).toEqual({ start: 180, seconds: 60 });
+  });
+
+  it("splits a 5-minute recording into bounded chunks", () => {
+    const totalSeconds = 5 * 60; // 300s
+    const segments = planWavChunks(totalSeconds);
+    expect(segments).toHaveLength(4);
+    expect(segments[0]).toEqual({ start: 0, seconds: 90 });
+    expect(segments[1]).toEqual({ start: 90, seconds: 90 });
+    expect(segments[2]).toEqual({ start: 180, seconds: 90 });
+    expect(segments[3]).toEqual({ start: 270, seconds: 30 });
+  });
+
+  it("splits a 10-minute recording into bounded chunks", () => {
+    const totalSeconds = 10 * 60; // 600s
+    const segments = planWavChunks(totalSeconds);
+    expect(segments).toHaveLength(7); // 6 x 90s + 1 x 60s
+    expect(segments[0]).toEqual({ start: 0, seconds: 90 });
+    expect(segments[6]).toEqual({ start: 540, seconds: 60 });
+  });
+
+  it("splits a 15-minute recording into bounded chunks", () => {
+    const totalSeconds = 15 * 60; // 900s
+    const segments = planWavChunks(totalSeconds);
+    expect(segments).toHaveLength(10);
+    expect(segments[9]).toEqual({ start: 810, seconds: 90 });
   });
 
   it("tiles the full duration with no gaps, no overlap, in order", () => {
-    for (const totalSeconds of [720, 721, 1500, 3600, 7200]) {
+    for (const totalSeconds of [10, 45, 90, 91, 180, 240, 300, 600, 720, 1500, 3600, 7200]) {
       const segments = planWavChunks(totalSeconds);
       let cursor = 0;
       for (const segment of segments) {
@@ -51,26 +94,43 @@ describe("planWavChunks", () => {
     }
   });
 
-  it("every chunk fits inside the provider byte limit", () => {
+  it("every chunk fits safely below the deployment HTTP body limit (4.5 MB) and provider cap (25 MB)", () => {
     const totalSeconds = 3600;
+    const serverlessBodyLimit = 4.5 * 1024 * 1024;
     for (const segment of planWavChunks(totalSeconds)) {
-      expect(wavSizeForSeconds(segment.seconds)).toBeLessThan(MAX_UPLOAD_BYTES);
+      const estimatedBytes = wavSizeForSeconds(segment.seconds);
+      expect(estimatedBytes).toBeLessThan(serverlessBodyLimit);
+      expect(estimatedBytes).toBeLessThan(MAX_UPLOAD_BYTES);
     }
   });
 });
 
 describe("wavSizeForSeconds / shouldUploadDirectly", () => {
   it("estimates 16 kHz mono 16-bit WAV size (44-byte header)", () => {
+    expect(wavSizeForSeconds(0)).toBe(44);
     expect(wavSizeForSeconds(1)).toBe(44 + TARGET_SAMPLE_RATE * TARGET_CHANNELS * 2);
-    expect(wavSizeForSeconds(600)).toBe(44 + 600 * 32000);
-    // A 12-minute chunk is under the upload cap.
-    expect(wavSizeForSeconds(720)).toBeLessThan(MAX_UPLOAD_BYTES);
+    expect(wavSizeForSeconds(60)).toBe(44 + 60 * 32000);
+    // A single chunk is safely under 4.5 MB and 25 MB
+    expect(wavSizeForSeconds(MAX_CHUNK_SECONDS)).toBeLessThan(4.5 * 1024 * 1024);
+    expect(wavSizeForSeconds(MAX_CHUNK_SECONDS)).toBeLessThan(MAX_UPLOAD_BYTES);
   });
 
   it("uploads directly at or below the direct threshold", () => {
+    expect(shouldUploadDirectly(1024)).toBe(true);
+    expect(shouldUploadDirectly(1024 * 1024)).toBe(true);
     expect(shouldUploadDirectly(DIRECT_UPLOAD_BYTES)).toBe(true);
     expect(shouldUploadDirectly(DIRECT_UPLOAD_BYTES + 1)).toBe(false);
     expect(shouldUploadDirectly(0)).toBe(false);
+    expect(shouldUploadDirectly(-1)).toBe(false);
+  });
+
+  it("correctly routes >24 MB recordings to the chunked workflow instead of direct upload", () => {
+    const large25MB = 25 * 1024 * 1024;
+    const large50MB = 50 * 1024 * 1024;
+    const large100MB = 100 * 1024 * 1024;
+    expect(shouldUploadDirectly(large25MB)).toBe(false);
+    expect(shouldUploadDirectly(large50MB)).toBe(false);
+    expect(shouldUploadDirectly(large100MB)).toBe(false);
   });
 });
 
@@ -118,6 +178,18 @@ describe("mergeTranscriptChunks", () => {
     expect(
       mergeTranscriptChunks(["Hello world.", "This is part two."]),
     ).toBe("Hello world. This is part two.");
+  });
+
+  it("preserves ordering of multiple sequential chunks for long recordings", () => {
+    const multiChunks = [
+      "Welcome to the session.",
+      "In this section we discuss architecture.",
+      "Here are three key considerations.",
+      "Finally we summarize our findings.",
+    ];
+    expect(mergeTranscriptChunks(multiChunks)).toBe(
+      "Welcome to the session. In this section we discuss architecture. Here are three key considerations. Finally we summarize our findings.",
+    );
   });
 
   it("normalizes whitespace within chunks", () => {

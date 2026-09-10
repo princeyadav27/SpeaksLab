@@ -145,6 +145,53 @@ export default function SpinExperience() {
   const displayed = preview ?? finalTopic;
   const landed = Boolean(finalTopic) && !spinning;
 
+  const playTimerFinishedSound = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    const AudioCtor =
+      window.AudioContext ||
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+
+    if (!AudioCtor) return;
+
+    try {
+      const context = audioContextRef.current ?? new AudioCtor();
+      audioContextRef.current = context;
+
+      if (context.state === "suspended") {
+        void context.resume();
+      }
+
+      const now = context.currentTime;
+      // Play a distinctive chime notification
+      const chimes = [
+        { freq: 587.33, offset: 0, dur: 0.35 },    // D5
+        { freq: 739.99, offset: 0.22, dur: 0.35 }, // F#5
+        { freq: 880.00, offset: 0.44, dur: 0.8 },  // A5
+      ];
+
+      chimes.forEach(({ freq, offset, dur }) => {
+        const osc = context.createOscillator();
+        const gain = context.createGain();
+
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + offset);
+
+        gain.gain.setValueAtTime(0.28, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + dur);
+
+        osc.connect(gain);
+        gain.connect(context.destination);
+
+        osc.start(now + offset);
+        osc.stop(now + offset + dur);
+      });
+    } catch {
+      // Audio notification must not crash the app
+    }
+  }, []);
+
   useEffect(() => {
     if (!finalTopic && prepStep !== "idle") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -179,6 +226,7 @@ export default function SpinExperience() {
         deadlineRef.current = null;
         setRemainingSeconds(0);
         setPrepStep("expired");
+        playTimerFinishedSound();
       }
     };
 
@@ -186,7 +234,23 @@ export default function SpinExperience() {
     const intervalId = window.setInterval(tick, 250);
 
     return () => window.clearInterval(intervalId);
-  }, [prepStep, prepMinutes, finalTopic]);
+  }, [prepStep, prepMinutes, finalTopic, playTimerFinishedSound]);
+
+  useEffect(() => {
+    if (prepStep === "countdown" && remainingSeconds > 0) {
+      const originalTitle = document.title;
+      document.title = `(${formatCountdown(remainingSeconds)}) Prep - SpeakLab`;
+      return () => {
+        document.title = originalTitle;
+      };
+    } else if (prepStep === "expired") {
+      const originalTitle = document.title;
+      document.title = `⏰ Time's Up! - SpeakLab`;
+      return () => {
+        document.title = originalTitle;
+      };
+    }
+  }, [prepStep, remainingSeconds]);
 
   useEffect(() => {
     return () => {
@@ -525,6 +589,24 @@ export default function SpinExperience() {
 
   function beginPreparation(minutes: number) {
     if (!finalTopic) return;
+
+    // Initialize/resume AudioContext on user interaction so timer alert can play even in background tab
+    if (typeof window !== "undefined") {
+      const AudioCtor =
+        window.AudioContext ||
+        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (AudioCtor && !audioContextRef.current) {
+        try {
+          const ctx = new AudioCtor();
+          if (ctx.state === "suspended") void ctx.resume();
+          audioContextRef.current = ctx;
+        } catch {
+          // ignore
+        }
+      }
+    }
+
     setPrepMinutes(minutes);
     setRemainingSeconds(minutes * 60);
     // eslint-disable-next-line
@@ -928,8 +1010,23 @@ export default function SpinExperience() {
 
               <div className="mt-4">
                 <p className="text-[14px] font-medium text-ink">Now explain it in your own words.</p>
-                <p className="mt-1 text-[13px] text-ink/55">No script. No notes.</p>
+                <p className="mt-1 text-[13px] text-ink/55">
+                  {notes.trim() ? "Use your prep notes below to guide your thoughts." : "No script. Speak clearly and confidently."}
+                </p>
               </div>
+
+              {notes.trim() ? (
+                <div className="mt-4 rounded-2xl border border-ink/10 bg-[#f5efe5] p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-cobalt">
+                      Your Prep Notes
+                    </span>
+                  </div>
+                  <p className="mt-2 max-h-36 overflow-y-auto whitespace-pre-line text-[13px] leading-relaxed text-ink/80">
+                    {notes}
+                  </p>
+                </div>
+              ) : null}
 
               <div className="mt-5 rounded-2xl border border-ink/10 bg-[#f5efe5] p-3">
                 <div className="mb-3 flex items-center justify-between gap-3 text-[12px] uppercase tracking-[0.16em] text-ink/45">
@@ -1093,6 +1190,17 @@ export default function SpinExperience() {
                     </button>
                   ))}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecordState("setup");
+                    setRecordError(null);
+                    void prepareRecordingCapture();
+                  }}
+                  className="mt-4 w-full rounded-xl border border-dashed border-ink/20 py-2.5 text-[13px] font-medium text-ink/70 transition hover:border-cobalt hover:text-cobalt"
+                >
+                  Skip timer &amp; start recording directly →
+                </button>
               </div>
             </>
           ) : prepStep === "countdown" && displayed ? (
@@ -1129,6 +1237,19 @@ export default function SpinExperience() {
                   className="w-full resize-none rounded-2xl border border-ink/10 bg-[#f9f3ea] p-3 text-[14px] text-ink placeholder:text-ink/35 focus:border-cobalt/40 focus:outline-none"
                 />
               </label>
+
+              <button
+                type="button"
+                onClick={() => {
+                  deadlineRef.current = null;
+                  setRecordState("setup");
+                  setRecordError(null);
+                  void prepareRecordingCapture();
+                }}
+                className="mt-6 w-full rounded-md bg-cobalt py-3 text-[15px] font-medium text-ivory hover:bg-cobalt-deep"
+              >
+                Start Recording Now →
+              </button>
             </>
           ) : prepStep === "expired" && displayed ? (
             <>

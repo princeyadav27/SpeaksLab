@@ -6,15 +6,14 @@
 
 // ── Provider / transport limits ───────────────────────────────────────────────
 
-/** Hard cap enforced by the server route and the Whisper API free tier. */
+/** Hard cap enforced by the server route and the Whisper API free tier (25 MB). */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
  * Files at or below this size are uploaded as-is (no decode, no chunking).
- * The margin below MAX_UPLOAD_BYTES leaves room for multipart/form-data
- * framing and provider-side decoding of container overhead.
+ * Sized safely below the 4.5 MB deployment body limit (e.g. Vercel serverless limit).
  */
-export const DIRECT_UPLOAD_BYTES = 24 * 1024 * 1024;
+export const DIRECT_UPLOAD_BYTES = 4 * 1024 * 1024;
 
 /**
  * Normalized transcription audio: 16 kHz mono 16-bit PCM.
@@ -27,11 +26,12 @@ export const TARGET_CHANNELS = 1;
 export const WAV_BYTES_PER_SECOND = TARGET_SAMPLE_RATE * TARGET_CHANNELS * 2;
 
 /**
- * Longest single WAV chunk uploaded in one request. 720 s of 16 kHz mono
- * 16-bit PCM ≈ 23.04 MB, safely under the 25 MB cap, so recordings up to
- * ~12 minutes are transcribed in a single request.
+ * Longest single WAV chunk uploaded in one request.
+ * 90 s of 16 kHz mono 16-bit PCM ≈ 2.88 MB (44 + 90 * 32000 = 2,880,044 B),
+ * safely below the 4.5 MB serverless deployment cap with ample headroom for
+ * multipart/form-data framing and network reliability.
  */
-export const MAX_CHUNK_SECONDS = 720;
+export const MAX_CHUNK_SECONDS = 90;
 
 // ── Chunk planning ────────────────────────────────────────────────────────────
 
