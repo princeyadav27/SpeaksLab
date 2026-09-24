@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { SavedRecording } from "@/lib/recordingsDb";
 
 /**
@@ -20,25 +20,26 @@ export default function RecordingPlayback({
   className?: string;
   showControls?: boolean;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const lastUrlRef = useRef<string | null>(null);
+  // The object URL is kept together with the blob it was created from. Media
+  // is loaded lazily on the My Recordings page, so right after switching
+  // recordings the previous (already revoked) URL must not be rendered for the
+  // next recording; that briefly pointed the player at a dead blob: URL.
+  const [source, setSource] = useState<{ blob: Blob; url: string } | null>(null);
 
   useEffect(() => {
     if (!recording.blob) return;
     // Create a fresh URL when the recording id changes
-    const next = URL.createObjectURL(recording.blob);
-    lastUrlRef.current = next;
+    const blob = recording.blob;
+    const next = URL.createObjectURL(blob);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setUrl(next);
+    setSource({ blob, url: next });
 
     return () => {
-      if (lastUrlRef.current) {
-        URL.revokeObjectURL(lastUrlRef.current);
-        lastUrlRef.current = null;
-      }
+      URL.revokeObjectURL(next);
     };
   }, [recording.id, recording.blob]);
 
+  const url = recording.blob && source?.blob === recording.blob ? source.url : null;
   if (!recording.blob || !url) return null;
 
   const isVideo = recording.blob.type.startsWith("video/");
