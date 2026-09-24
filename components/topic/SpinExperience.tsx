@@ -133,6 +133,9 @@ export default function SpinExperience() {
   const recordingIntervalRef = useRef<number | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
   const pendingRecordingStartRef = useRef(false);
+  // Incremented for every camera/microphone request; only the latest request
+  // may keep its stream (see prepareRecordingCapture).
+  const captureRequestRef = useRef(0);
   const videoPreviewRef = useRef<HTMLVideoElement | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const spinAudioRef = useRef<{
@@ -267,6 +270,9 @@ export default function SpinExperience() {
 
   useEffect(() => {
     return () => {
+      // Discard a camera/microphone request still waiting for permission, so
+      // its stream is stopped instead of staying live after leaving the page.
+      captureRequestRef.current += 1;
       if (spinFrameRef.current !== null) {
         window.cancelAnimationFrame(spinFrameRef.current);
       }
@@ -643,21 +649,36 @@ export default function SpinExperience() {
     }
   }
 
-  async function prepareRecordingCapture() {
+  /**
+   * Acquire the camera/microphone stream. `wantsVideo` defaults to the current
+   * render's state; callers that have just changed the mode or camera toggle
+   * must pass the NEW value, because this closure still holds the old state.
+   */
+  async function prepareRecordingCapture(
+    wantsVideo: boolean = recordMode === "camera-mic" && cameraEnabled,
+  ) {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      pendingRecordingStartRef.current = false;
       setRecordError("This browser does not support recording from the microphone or camera.");
       return;
     }
 
     resetMediaStream();
-
-    const wantsVideo = recordMode === "camera-mic" && cameraEnabled;
+    // Toggles and the Start button can overlap while a permission prompt is
+    // open. Only the latest request may own the stream; an older one is
+    // stopped instead of being leaked (which left the camera light on).
+    const requestId = ++captureRequestRef.current;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: wantsVideo,
       });
+
+      if (requestId !== captureRequestRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
 
       mediaStreamRef.current = stream;
       if (videoPreviewRef.current) {
@@ -672,6 +693,10 @@ export default function SpinExperience() {
         window.setTimeout(startRecording, 0);
       }
     } catch {
+      if (requestId !== captureRequestRef.current) return;
+      // A blocked request must not leave a queued auto-start behind; it would
+      // otherwise start recording unexpectedly after a later toggle succeeds.
+      pendingRecordingStartRef.current = false;
       setRecordError("Microphone or camera permission was blocked. Please allow access and try again.");
     }
   }
@@ -680,15 +705,18 @@ export default function SpinExperience() {
     if (recordState === "recording" || recordState === "review") return;
     setRecordMode(nextMode);
     resetMediaStream();
-    // Wait for the new state to commit before reacquiring the matching stream.
-    window.setTimeout(() => void prepareRecordingCapture(), 0);
+    // Pass the NEW setting explicitly. Reading state here (even after a
+    // timeout) used this render's stale recordMode, so the camera stayed on
+    // in "Microphone only" and the preview went black in camera mode.
+    void prepareRecordingCapture(nextMode === "camera-mic" && cameraEnabled);
   }
 
   function updateCameraEnabled(enabled: boolean) {
     if (recordState === "recording" || recordState === "review") return;
     setCameraEnabled(enabled);
     resetMediaStream();
-    window.setTimeout(() => void prepareRecordingCapture(), 0);
+    // Same stale-state issue: "Camera Off" used to reacquire the camera.
+    void prepareRecordingCapture(recordMode === "camera-mic" && enabled);
   }
 
   function startRecording() {
@@ -704,7 +732,10 @@ export default function SpinExperience() {
       return;
     }
 
-    const wantsVideo = recordMode === "camera-mic" && cameraEnabled;
+    // Match the recorder to the stream that was actually captured rather than
+    // to this closure's state: the queued auto-start above can run a closure
+    // from an earlier render.
+    const wantsVideo = mediaStreamRef.current.getVideoTracks().length > 0;
     const mimeTypes = wantsVideo
       ? ["video/webm;codecs=vp9,opus", "video/webm"]
       : ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
@@ -734,7 +765,7 @@ export default function SpinExperience() {
       const nextUrl = URL.createObjectURL(blob);
       recordedPreviewUrlRef.current = nextUrl;
       setRecordedUrl(nextUrl);
-      setRecordingType(recordMode === "camera-mic" && cameraEnabled ? "video" : "audio");
+      setRecordingType(wantsVideo ? "video" : "audio");
       setRecordState("review");
       setRecordError(null);
       clearRecordingTimer();
