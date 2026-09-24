@@ -25,11 +25,18 @@ const DB_NAME = "speaklab-recordings";
 const STORE_NAME = "recordings";
 const DB_VERSION = 2;
 const BLOB_STORE_NAME = "recording-blobs";
+
+// One connection is opened lazily and shared by every helper in this module.
+// Helpers must NEVER call database.close() on it: a closed connection stays
+// cached, and every later call then fails with "InvalidStateError: The
+// database connection is closing" (this broke media loading, saving, and
+// deleting on the My Recordings page). The cache is cleared automatically
+// whenever the connection really goes away.
 let databasePromise: Promise<IDBDatabase> | null = null;
 
 function openDatabase(): Promise<IDBDatabase> {
   if (databasePromise) return databasePromise;
-  databasePromise = new Promise((resolve, reject) => {
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof window === "undefined" || !("indexedDB" in window)) {
       reject(new Error("IndexedDB is not supported in this browser."));
       return;
@@ -68,19 +75,30 @@ function openDatabase(): Promise<IDBDatabase> {
 
     request.onsuccess = () => {
       const database = request.result;
-      database.onversionchange = () => database.close();
+      // Another tab is deleting or upgrading the database: step aside so it
+      // is not blocked. An explicit close() does not fire the "close" event,
+      // so the cached (now closed) connection must be forgotten here too.
+      database.onversionchange = () => {
+        if (databasePromise === opening) databasePromise = null;
+        database.close();
+      };
+      // The browser closed the connection itself (e.g. site data cleared).
       database.onclose = () => {
-        databasePromise = null;
+        if (databasePromise === opening) databasePromise = null;
       };
       resolve(database);
     };
 
     request.onerror = () => {
-      databasePromise = null;
       reject(request.error ?? new Error("Failed to open IndexedDB."));
     };
   });
-  return databasePromise;
+  databasePromise = opening;
+  // Never cache a failed open, so the next call can try again.
+  opening.catch(() => {
+    if (databasePromise === opening) databasePromise = null;
+  });
+  return opening;
 }
 
 export async function saveRecording(recording: SavedRecording): Promise<void> {
@@ -117,7 +135,7 @@ export async function getRecordings(): Promise<SavedRecording[]> {
     request.onerror = () => reject(request.error ?? new Error("Failed to load recordings."));
   });
 
-  database.close();
+  // Do not close the shared connection here (see openDatabase).
   return recordings.sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
