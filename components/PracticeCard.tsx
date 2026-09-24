@@ -29,7 +29,6 @@ export default function PracticeCard({
           alt={imageAlt}
           fill
           sizes="92px"
-          priority
           className="object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]"
           style={{ objectPosition }}
         />

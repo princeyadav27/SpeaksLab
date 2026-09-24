@@ -131,6 +131,8 @@ export default function SpinExperience() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingIntervalRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const pendingRecordingStartRef = useRef(false);
   const videoPreviewRef = useRef<HTMLVideoElement | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const spinAudioRef = useRef<{
@@ -233,7 +235,18 @@ export default function SpinExperience() {
     tick();
     const intervalId = window.setInterval(tick, 250);
 
-    return () => window.clearInterval(intervalId);
+    // Background tabs are aggressively timer-throttled by browsers. The
+    // deadline remains authoritative, and a visibility event immediately
+    // resynchronizes the visible countdown when the user returns.
+    const syncWhenVisible = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", syncWhenVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+    };
   }, [prepStep, prepMinutes, finalTopic, playTimerFinishedSound]);
 
   useEffect(() => {
@@ -609,7 +622,6 @@ export default function SpinExperience() {
 
     setPrepMinutes(minutes);
     setRemainingSeconds(minutes * 60);
-    // eslint-disable-next-line
     deadlineRef.current = Date.now() + minutes * 60 * 1000;
     setPrepStep("countdown");
   }
@@ -652,15 +664,38 @@ export default function SpinExperience() {
         videoPreviewRef.current.srcObject = stream;
       }
       setRecordError(null);
+      if (pendingRecordingStartRef.current) {
+        pendingRecordingStartRef.current = false;
+        // Permission was requested by the Start button; continue the action
+        // automatically once the stream is ready instead of requiring a
+        // second click.
+        window.setTimeout(startRecording, 0);
+      }
     } catch {
       setRecordError("Microphone or camera permission was blocked. Please allow access and try again.");
     }
   }
 
+  function updateRecordMode(nextMode: "camera-mic" | "mic-only") {
+    if (recordState === "recording" || recordState === "review") return;
+    setRecordMode(nextMode);
+    resetMediaStream();
+    // Wait for the new state to commit before reacquiring the matching stream.
+    window.setTimeout(() => void prepareRecordingCapture(), 0);
+  }
+
+  function updateCameraEnabled(enabled: boolean) {
+    if (recordState === "recording" || recordState === "review") return;
+    setCameraEnabled(enabled);
+    resetMediaStream();
+    window.setTimeout(() => void prepareRecordingCapture(), 0);
+  }
+
   function startRecording() {
     if (!mediaStreamRef.current) {
+      pendingRecordingStartRef.current = true;
+      setRecordError("Requesting microphone and camera access…");
       void prepareRecordingCapture();
-      setRecordError("Your microphone or camera is not ready yet. Please try again.");
       return;
     }
 
@@ -710,12 +745,16 @@ export default function SpinExperience() {
     recorder.start();
     mediaRecorderRef.current = recorder;
     setRecordingDuration(0);
+    recordingStartedAtRef.current = Date.now();
     setRecordState("recording");
     setRecordError(null);
 
     recordingIntervalRef.current = window.setInterval(() => {
-      setRecordingDuration((current) => current + 1);
-    }, 1000);
+      const startedAt = recordingStartedAtRef.current;
+      if (startedAt) {
+        setRecordingDuration(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+      }
+    }, 250);
   }
 
   function stopRecording() {
@@ -723,6 +762,7 @@ export default function SpinExperience() {
       return;
     }
     mediaRecorderRef.current.stop();
+    recordingStartedAtRef.current = null;
     clearRecordingTimer();
   }
 
@@ -761,10 +801,9 @@ export default function SpinExperience() {
       const blob = await response.blob();
       const categoryName = category?.name ?? "Unknown Category";
 
-      if (recordedPreviewUrlRef.current) {
-        URL.revokeObjectURL(recordedPreviewUrlRef.current);
-        recordedPreviewUrlRef.current = null;
-      }
+      // Keep the preview URL alive while transcription is running. Revoking
+      // it here makes the video/audio player disappear during transcription.
+      // The recordingUrl effect and final cleanup revoke it after the flow ends.
 
       const recordingId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -1038,7 +1077,7 @@ export default function SpinExperience() {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => setRecordMode("camera-mic")}
+                      onClick={() => updateRecordMode("camera-mic")}
                       className={`rounded-full px-3 py-1.5 text-[12px] ${
                         recordMode === "camera-mic" ? "bg-cobalt text-ivory" : "bg-[#efe8da] text-ink/70"
                       }`}
@@ -1047,7 +1086,7 @@ export default function SpinExperience() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setRecordMode("mic-only")}
+                      onClick={() => updateRecordMode("mic-only")}
                       className={`rounded-full px-3 py-1.5 text-[12px] ${
                         recordMode === "mic-only" ? "bg-cobalt text-ivory" : "bg-[#efe8da] text-ink/70"
                       }`}
@@ -1059,7 +1098,7 @@ export default function SpinExperience() {
                   {recordMode === "camera-mic" ? (
                     <button
                       type="button"
-                      onClick={() => setCameraEnabled((value) => !value)}
+                      onClick={() => updateCameraEnabled(!cameraEnabled)}
                       className="rounded-full border border-ink/10 bg-[#fbf7ef] px-2.5 py-1.5 text-[11px] uppercase tracking-[0.14em] text-ink/70"
                     >
                       Camera {cameraEnabled ? "On" : "Off"}

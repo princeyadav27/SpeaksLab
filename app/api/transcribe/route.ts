@@ -9,7 +9,7 @@ import {
 import { MAX_UPLOAD_BYTES, formatBytes } from "@/lib/transcriptionShared";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * Encode a backend result into the HTTP response the client expects.
@@ -25,6 +25,16 @@ function toResponse(result: TranscriptionResult): NextResponse {
     });
   }
   return NextResponse.json({ error: result.error }, { status: result.status });
+}
+
+
+/**
+ * Lets the browser choose the least expensive long-recording strategy. Local
+ * Whisper can process one larger file in one process, while hosted providers
+ * still use bounded client-side chunks for deployment body limits.
+ */
+export async function GET() {
+  return NextResponse.json({ backend: selectBackend().kind, maxUploadBytes: MAX_UPLOAD_BYTES });
 }
 
 export async function POST(request: Request) {

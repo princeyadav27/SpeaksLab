@@ -36,7 +36,13 @@ export default async function PracticePage({ searchParams }: PracticePageProps) 
   const collections = getShadowCollections();
   const { deleted } = await searchParams;
   const cookieValue = (await cookies()).get(HIDDEN_VIDEOS_COOKIE)?.value ?? "";
-  const decodedCookieValue = decodeURIComponent(cookieValue);
+  let decodedCookieValue = "";
+  try {
+    decodedCookieValue = decodeURIComponent(cookieValue);
+  } catch {
+    // Ignore a malformed client cookie rather than failing the whole page.
+    decodedCookieValue = "";
+  }
   const hiddenIds = new Set(
     `${decodedCookieValue},${deleted ?? ""}`.split(",").filter(Boolean),
   );
@@ -157,14 +163,8 @@ export default async function PracticePage({ searchParams }: PracticePageProps) 
                     className="flex h-full flex-col"
                   >
                     <div className="relative aspect-[16/7] w-full overflow-hidden bg-ink/5">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`https://i.ytimg.com/vi/${c.playlistId.replace(/^PL/, "EC")}/hqdefault.jpg`}
-                        alt=""
-                        className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]"
-                        loading="lazy"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-ink/30 to-transparent" />
+                      <div className="h-full w-full bg-[linear-gradient(135deg,#0029a4_0%,#355bc7_48%,#e8dcc4_100%)] transition-transform duration-700 ease-out group-hover:scale-[1.03]" aria-hidden="true" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-ink/40 to-transparent" />
                       <span className="absolute bottom-2 left-2 rounded-md bg-ink/85 px-2 py-0.5 text-[11px] uppercase tracking-[0.12em] text-ivory">
                         Playlist
                       </span>

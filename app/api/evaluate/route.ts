@@ -3,6 +3,7 @@ import { validateEvaluation, type AIEvaluation } from "@/lib/aiEvaluation";
 import type { SpeakingMetrics } from "@/lib/speakingMetrics";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 // ── Request shape ─────────────────────────────────────────────────────────────
 
@@ -286,7 +287,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  // Basic input validation
+  // Basic input validation. Reject non-object JSON before dereferencing it;
+  // this endpoint is public and malformed requests must return 400, not 500.
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Request body must be a JSON object." }, { status: 400 });
+  }
   if (!body.transcript || body.transcript.trim().length === 0) {
     return NextResponse.json(
       { error: "Transcript is empty — nothing to evaluate." },
@@ -298,6 +303,21 @@ export async function POST(request: Request) {
       { error: "Missing required fields: topicTitle, category, or metrics." },
       { status: 400 },
     );
+  }
+  if (
+    typeof body.metrics !== "object" ||
+    !Array.isArray(body.metrics.fillerWords) ||
+    !Array.isArray(body.metrics.repeatedWords) ||
+    !body.metrics.fillerWords.every((item) => item && typeof item.word === "string" && Number.isFinite(item.count)) ||
+    !body.metrics.repeatedWords.every((item) => item && typeof item.word === "string" && Number.isFinite(item.count)) ||
+    typeof body.metrics.wordCount !== "number" ||
+    typeof body.metrics.sentenceCount !== "number" ||
+    typeof body.metrics.durationSeconds !== "number" ||
+    !Number.isFinite(body.metrics.wordCount) ||
+    !Number.isFinite(body.metrics.sentenceCount) ||
+    !Number.isFinite(body.metrics.durationSeconds)
+  ) {
+    return NextResponse.json({ error: "Invalid speaking metrics." }, { status: 400 });
   }
 
   const apiKey = process.env.NVIDIA_API_KEY;
@@ -324,9 +344,6 @@ export async function POST(request: Request) {
     let rawText: string;
 
     try {
-      const ctrl = new AbortController();
-      const timeoutId = setTimeout(() => ctrl.abort(), 45_000);
-
       const nvidiaResponse = await fetch(NVIDIA_API_URL, {
         method: "POST",
         headers: {
@@ -341,14 +358,14 @@ export async function POST(request: Request) {
           ],
           temperature: 0.2,
           top_p: 0.7,
-          max_tokens: 1400,
+          max_tokens: 900,
           response_format: { type: "json_object" },
           stream: false,
         }),
-        signal: ctrl.signal,
+        // Bound provider latency. The local fallback is preferable to
+        // keeping a serverless request open for several minutes.
+        signal: AbortSignal.timeout(20_000),
       });
-
-      clearTimeout(timeoutId);
 
       if (!nvidiaResponse.ok) {
         const errorText = await nvidiaResponse.text().catch(() => "");

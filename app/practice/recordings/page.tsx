@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Navbar from "@/components/Navbar";
 import RecordingPlayback from "@/components/recordings/RecordingPlayback";
 import EvaluationDetails from "@/components/recordings/EvaluationDetails";
-import { deleteRecording, getRecordings, saveRecording, type SavedRecording } from "@/lib/recordingsDb";
+import { deleteRecording, getRecordingBlob, getRecordings, saveRecording, type SavedRecording } from "@/lib/recordingsDb";
 import { getCategories } from "@/lib/categories";
 import { getTopicById } from "@/lib/topics";
 import { calculateMetrics } from "@/lib/speakingMetrics";
@@ -40,6 +40,14 @@ export default function MyRecordingsPage() {
       setSelectedId(items[0]?.id ?? null);
     }).catch(() => setRecordings([]));
   }, []);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    void getRecordingBlob(selectedId).then((blob) => {
+      if (!blob) return;
+      setRecordings((current) => current?.map((item) => item.id === selectedId ? { ...item, blob } : item) ?? current);
+    }).catch(() => setActionError("The recording media could not be loaded."));
+  }, [selectedId]);
 
   useEffect(() => {
     function closeCategoryMenu(event: MouseEvent) {
@@ -83,6 +91,7 @@ export default function MyRecordingsPage() {
     setTranscriptionStatus(null);
     setActionError(null);
     try {
+      if (!recording.blob) throw new Error("The recording media is still loading. Please try again.");
       const transcript = await transcribeRecording(recording.blob, {
         onStatus: setTranscriptionStatus,
       });
@@ -103,7 +112,13 @@ export default function MyRecordingsPage() {
       setActionError("Transcribe this recording before requesting an evaluation.");
       return;
     }
-    if (isCompleteEvaluation(recording.evaluation)) {
+    // Heuristic fallback evaluations have assessed=false for relevance. They
+    // must remain retryable so a later click can obtain a real AI evaluation
+    // after a transient provider outage or missing API key.
+    const hasRealAIEvaluation =
+      isCompleteEvaluation(recording.evaluation) &&
+      recording.evaluation.questionRelevance.assessed !== false;
+    if (hasRealAIEvaluation) {
       setActionError(null);
       return;
     }
@@ -201,7 +216,7 @@ export default function MyRecordingsPage() {
 
               <article className="min-w-0 rounded-2xl border border-ink/10 bg-[#fbf7ef] p-5 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><h2 className="font-display text-[clamp(1.35rem,3vw,2rem)] leading-tight text-ink">{selected.topicName}</h2><div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ink/55"><span className="rounded-full bg-[#eae5da] px-2 py-1 text-ink/75">{selected.categoryName}</span><span className="rounded-full bg-[#f8e0e0] px-2 py-1 text-[#9d4848]">{selected.difficulty}</span><span>{new Date(selected.createdAt).toLocaleString()}</span><span>◷ {fmtDuration(selected.durationSeconds)}</span></div></div><div className="flex items-center gap-2"><button type="button" onClick={() => void handleDelete(selected)} className="rounded-lg border border-[#d77f7f]/50 px-3 py-2 text-[12px] text-[#a44848] hover:bg-[#f8e6e6]">Delete</button><button type="button" onClick={() => void handleShare(selected)} className="rounded-lg border border-ink/10 px-3 py-2 text-[12px] text-ink/70 hover:border-cobalt/30 hover:text-cobalt">Share</button></div></div>
 
-                <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(230px,.65fr)]"><div><RecordingPlayback recording={selected} className="aspect-video w-full rounded-xl bg-ink object-cover" showControls /><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void handleTranscribe(selected)} disabled={transcribingId === selected.id || evaluatingId === selected.id} className="rounded-lg bg-cobalt px-3.5 py-2 text-[12px] font-medium text-ivory disabled:opacity-50">{transcribingId === selected.id ? "Transcribing..." : selected.transcript ? "Transcribe Again" : "Transcribe"}</button><button type="button" onClick={() => void handleEvaluate(selected)} disabled={!selected.transcript || transcribingId === selected.id || evaluatingId === selected.id} title={!selected.transcript ? "Transcribe this recording first" : undefined} className="rounded-lg border border-cobalt/25 bg-[#eef1fa] px-3.5 py-2 text-[12px] font-medium text-cobalt disabled:cursor-not-allowed disabled:opacity-45">{evaluatingId === selected.id ? "Evaluating..." : "AI Evaluation"}</button>{shareMessage ? <span className="self-center text-[11px] text-emerald-700">{shareMessage}</span> : null}</div>
+                <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(230px,.65fr)]"><div><RecordingPlayback recording={selected} className="aspect-video w-full rounded-xl bg-ink object-cover" showControls /><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void handleTranscribe(selected)} disabled={!selected.blob || transcribingId === selected.id || evaluatingId === selected.id} className="rounded-lg bg-cobalt px-3.5 py-2 text-[12px] font-medium text-ivory disabled:opacity-50">{transcribingId === selected.id ? "Transcribing..." : selected.transcript ? "Transcribe Again" : "Transcribe"}</button><button type="button" onClick={() => void handleEvaluate(selected)} disabled={!selected.transcript || transcribingId === selected.id || evaluatingId === selected.id} title={!selected.transcript ? "Transcribe this recording first" : undefined} className="rounded-lg border border-cobalt/25 bg-[#eef1fa] px-3.5 py-2 text-[12px] font-medium text-cobalt disabled:cursor-not-allowed disabled:opacity-45">{evaluatingId === selected.id ? "Evaluating..." : selected.evaluation?.questionRelevance.assessed === false ? "Retry AI Evaluation" : "AI Evaluation"}</button>{shareMessage ? <span className="self-center text-[11px] text-emerald-700">{shareMessage}</span> : null}</div>
                 {transcriptionStatus ? <p className="text-[11px] text-cobalt">{transcriptionStatus}</p> : null}
                 </div><section className="rounded-xl border border-ink/10 bg-[#f7f1e7] p-4"><div className="flex items-center justify-between gap-3"><h3 className="font-display text-[1.15rem] text-ink">Transcript</h3>{selected.transcript ? <button type="button" onClick={() => void navigator.clipboard?.writeText(selected.transcript ?? "")} className="rounded-lg border border-ink/10 bg-[#fbf7ef] px-2.5 py-1.5 text-[11px] text-ink/70">Copy</button> : null}</div><p className="mt-3 max-h-48 overflow-y-auto text-[13px] leading-relaxed text-ink/70">{selected.transcript ?? "No transcript yet. Use Transcribe to generate one from this recording."}</p></section>{selected.notes ? <section className="mt-4 rounded-xl border border-ink/10 bg-[#f7f1e7] p-4"><h3 className="font-display text-[1.15rem] text-ink">Prep Notes</h3><p className="mt-3 max-h-40 overflow-y-auto whitespace-pre-line text-[13px] leading-relaxed text-ink/70">{selected.notes}</p></section> : null}</div>
 

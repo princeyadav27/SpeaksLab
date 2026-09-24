@@ -4,6 +4,7 @@ import { pickTopic } from "@/lib/topicEngine";
 import type { TopicDifficulty } from "@/lib/topics";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 // ── Request shape ──────────────────────────────────────────────────────────
 
@@ -107,6 +108,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Request body must be a JSON object." }, { status: 400 });
+  }
+
   // Validate the request BEFORE checking for an API key. Previously the
   // no-key early return ran first, so malformed requests were answered with a
   // misleading 503 "NVIDIA_API_KEY is not configured" (or silently downgraded
@@ -150,8 +155,6 @@ export async function POST(request: Request) {
     console.log(`[generate-question] Trying model: ${model}`);
     let rawText: string;
     try {
-      const ctrl = new AbortController();
-      const timeoutId = setTimeout(() => ctrl.abort(), 30_000);
       const res = await fetch(NVIDIA_API_URL, {
         method: "POST",
         headers: {
@@ -169,9 +172,8 @@ export async function POST(request: Request) {
           max_tokens: 600,
           stream: false,
         }),
-        signal: ctrl.signal,
+        signal: AbortSignal.timeout(15_000),
       });
-      clearTimeout(timeoutId);
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => "");

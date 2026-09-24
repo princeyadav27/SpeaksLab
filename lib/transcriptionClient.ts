@@ -40,6 +40,18 @@ type AudioSegmentBlob = {
  * When `allowEmpty` is true, an empty result is a valid silent segment
  * (inside a chunked long recording) and returns "" instead of failing.
  */
+async function shouldUseSingleLocalUpload(blob: Blob): Promise<boolean> {
+  if (blob.size <= 0 || blob.size > MAX_UPLOAD_BYTES) return false;
+  try {
+    const response = await fetch("/api/transcribe", { method: "GET" });
+    if (!response.ok) return false;
+    const data = (await response.json()) as { backend?: string };
+    return data.backend === "local";
+  } catch {
+    return false;
+  }
+}
+
 async function postForTranscript(
   file: Blob,
   fileName: string,
@@ -165,6 +177,13 @@ export async function transcribeRecording(
     return postForTranscript(blob, `recording.${extensionFor(blob)}`);
   }
 
+  // Local Whisper is a process-based backend. When the file fits the server
+  // cap, send it once so the model is loaded once instead of once per chunk.
+  if (await shouldUseSingleLocalUpload(blob)) {
+    report("Transcribing…");
+    return postForTranscript(blob, `recording.${extensionFor(blob)}`);
+  }
+
   // Long-recording path: extract + normalize audio, then chunked uploads.
   report("Preparing the recording for transcription…");
   let segments: AudioSegmentBlob[];
@@ -184,19 +203,30 @@ export async function transcribeRecording(
     throw new Error("No audio was found in the recording.");
   }
 
-  const transcripts: string[] = [];
-  for (const segment of segments) {
-    const label =
+  // Upload a small bounded batch concurrently. This preserves output order
+  // while avoiding the very long sum-of-all-chunks latency of sequential
+  // uploads. A limit of three keeps bandwidth and provider rate limits sane.
+  const transcripts = new Array<string>(segments.length);
+  const concurrency = 3;
+  for (let start = 0; start < segments.length; start += concurrency) {
+    const batch = segments.slice(start, start + concurrency);
+    report(
       segments.length === 1
         ? "Transcribing…"
-        : `Transcribing audio (part ${segment.index + 1} of ${segments.length})…`;
-    report(label);
-    const transcript = await postForTranscript(
-      segment.blob,
-      `audio-part-${segment.index + 1}.wav`,
-      { allowEmpty: true },
+        : `Transcribing audio (parts ${start + 1}–${start + batch.length} of ${segments.length})…`,
     );
-    transcripts.push(transcript);
+    const results = await Promise.all(
+      batch.map((segment) =>
+        postForTranscript(
+          segment.blob,
+          `audio-part-${segment.index + 1}.wav`,
+          { allowEmpty: true },
+        ),
+      ),
+    );
+    results.forEach((transcript, index) => {
+      transcripts[start + index] = transcript;
+    });
   }
 
   return mergeTranscriptChunks(transcripts);
