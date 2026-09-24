@@ -14,6 +14,7 @@ export type SavedRecording = {
   notes?: string;
   durationSeconds: number;
   createdAt: string;
+  /** Loaded lazily from IndexedDB when a recording is selected. */
   blob: Blob;
   transcript?: string;
   metrics?: SpeakingMetrics;
@@ -22,10 +23,13 @@ export type SavedRecording = {
 
 const DB_NAME = "speaklab-recordings";
 const STORE_NAME = "recordings";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const BLOB_STORE_NAME = "recording-blobs";
+let databasePromise: Promise<IDBDatabase> | null = null;
 
 function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (databasePromise) return databasePromise;
+  databasePromise = new Promise((resolve, reject) => {
     if (typeof window === "undefined" || !("indexedDB" in window)) {
       reject(new Error("IndexedDB is not supported in this browser."));
       return;
@@ -38,31 +42,64 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains(STORE_NAME)) {
         database.createObjectStore(STORE_NAME, { keyPath: "id" });
       }
+      if (!database.objectStoreNames.contains(BLOB_STORE_NAME)) {
+        database.createObjectStore(BLOB_STORE_NAME, { keyPath: "id" });
+      }
+
+      // Move existing media out of the listing store. Future library loads
+      // can then read lightweight metadata without loading every video blob.
+      if (request.transaction && request.transaction.db.version === 2) {
+        const records = request.transaction.objectStore(STORE_NAME);
+        const blobs = request.transaction.objectStore(BLOB_STORE_NAME);
+        records.openCursor().onsuccess = (event) => {
+          const cursor = (event.target as IDBRequest).result as IDBCursorWithValue | null;
+          if (!cursor) return;
+          const value = cursor.value as SavedRecording;
+          if (value.blob) {
+            blobs.put({ id: value.id, blob: value.blob });
+            const metadata = { ...value } as Partial<SavedRecording> & { id: string };
+            delete metadata.blob;
+            cursor.update(metadata);
+          }
+          cursor.continue();
+        };
+      }
     };
 
     request.onsuccess = () => {
-      resolve(request.result);
+      const database = request.result;
+      database.onversionchange = () => database.close();
+      database.onclose = () => {
+        databasePromise = null;
+      };
+      resolve(database);
     };
 
     request.onerror = () => {
+      databasePromise = null;
       reject(request.error ?? new Error("Failed to open IndexedDB."));
     };
   });
+  return databasePromise;
 }
 
 export async function saveRecording(recording: SavedRecording): Promise<void> {
   const database = await openDatabase();
 
   await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const transaction = database.transaction([STORE_NAME, BLOB_STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.put(recording);
+    const blobs = transaction.objectStore(BLOB_STORE_NAME);
+    const metadata = { ...recording } as Partial<SavedRecording> & { id: string };
+    delete metadata.blob;
+    store.put(metadata);
+    if (recording.blob) blobs.put({ id: recording.id, blob: recording.blob });
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error ?? new Error("Failed to save recording."));
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("Failed to save recording."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("Saving recording was aborted."));
   });
 
-  database.close();
 }
 
 export async function getRecordings(): Promise<SavedRecording[]> {
@@ -90,13 +127,26 @@ export async function deleteRecording(id: string): Promise<void> {
   const database = await openDatabase();
 
   await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const transaction = database.transaction([STORE_NAME, BLOB_STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(id);
+    const blobs = transaction.objectStore(BLOB_STORE_NAME);
+    store.delete(id);
+    blobs.delete(id);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error ?? new Error("Failed to delete recording."));
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("Failed to delete recording."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("Deleting recording was aborted."));
   });
 
-  database.close();
+}
+
+export async function getRecordingBlob(id: string): Promise<Blob | undefined> {
+  const database = await openDatabase();
+  return new Promise<Blob | undefined>((resolve, reject) => {
+    const request = database.transaction(BLOB_STORE_NAME, "readonly")
+      .objectStore(BLOB_STORE_NAME)
+      .get(id);
+    request.onsuccess = () => resolve((request.result as { blob?: Blob } | undefined)?.blob);
+    request.onerror = () => reject(request.error ?? new Error("Failed to load recording media."));
+  });
 }

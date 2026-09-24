@@ -8,11 +8,17 @@ export default function DeleteShadowVideoButton({ videoId }: { videoId: string }
   const router = useRouter();
 
   function removeVideo() {
-    const current = document.cookie
+    const rawCookie = document.cookie
       .split("; ")
-      .find((cookie) => cookie.startsWith(`${HIDDEN_VIDEOS_COOKIE}=`))
-      ?.split("=")[1];
-    const hiddenIds = current ? decodeURIComponent(current).split(",").filter(Boolean) : [];
+      .find((cookie) => cookie.startsWith(`${HIDDEN_VIDEOS_COOKIE}=`));
+    const current = rawCookie?.slice(HIDDEN_VIDEOS_COOKIE.length + 1);
+    let decoded = "";
+    try {
+      decoded = current ? decodeURIComponent(current) : "";
+    } catch {
+      decoded = "";
+    }
+    const hiddenIds = decoded.split(",").filter(Boolean);
     if (!hiddenIds.includes(videoId)) hiddenIds.push(videoId);
     document.cookie = `${HIDDEN_VIDEOS_COOKIE}=${encodeURIComponent(hiddenIds.join(","))}; path=/; max-age=31536000; samesite=lax`;
     router.push("/practice");

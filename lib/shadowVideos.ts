@@ -133,8 +133,13 @@ export function extractYouTubeVideoId(input: string): string | null {
 
     if (hostname === "youtu.be") {
       videoId = url.pathname.split("/").filter(Boolean)[0] ?? "";
-    } else if (hostname === "youtube.com" || hostname === "m.youtube.com") {
-      if (url.pathname === "/watch") {
+    } else if (
+      hostname === "youtube.com" ||
+      hostname === "m.youtube.com" ||
+      hostname === "music.youtube.com" ||
+      hostname === "youtube-nocookie.com"
+    ) {
+      if (url.pathname.replace(/\/$/, "") === "/watch") {
         videoId = url.searchParams.get("v") ?? "";
       } else if (url.pathname.startsWith("/shorts/") || url.pathname.startsWith("/embed/")) {
         videoId = url.pathname.split("/").filter(Boolean)[1] ?? "";

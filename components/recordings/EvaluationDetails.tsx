@@ -67,7 +67,8 @@ export default function EvaluationDetails({ evaluation }: { evaluation: AIEvalua
     <section className="mt-6 rounded-2xl border border-cobalt/15 bg-[#fbf7ef] p-4 sm:p-5">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-ink/10 pb-4">
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-cobalt">AI Evaluation</p>
+          <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-cobalt">{notAssessed ? "Heuristic Evaluation" : "AI Evaluation"}</p>
+          {notAssessed ? <p className="mt-1 text-[11px] text-ink/55">AI evaluation was unavailable. Retry from the recordings page when the service is available.</p> : null}
           <h3 className="mt-1 font-display text-[1.5rem] text-ink">Your complete speaking review</h3>
         </div>
         <p className="font-display text-[2.2rem] leading-none text-cobalt">

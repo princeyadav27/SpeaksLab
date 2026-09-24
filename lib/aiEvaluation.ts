@@ -37,7 +37,7 @@ export type AIEvaluation = {
 // ── Validation ────────────────────────────────────────────────────────────────
 
 function isIntInRange(value: unknown, min: number, max: number): boolean {
-  return typeof value === "number" && isFinite(value) && value >= min && value <= max;
+  return typeof value === "number" && Number.isInteger(value) && Number.isFinite(value) && value >= min && value <= max;
 }
 
 function isStringArray(value: unknown): value is string[] {

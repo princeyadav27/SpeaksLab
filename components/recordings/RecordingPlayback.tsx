@@ -24,6 +24,7 @@ export default function RecordingPlayback({
   const lastUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!recording.blob) return;
     // Create a fresh URL when the recording id changes
     const next = URL.createObjectURL(recording.blob);
     lastUrlRef.current = next;
@@ -38,7 +39,7 @@ export default function RecordingPlayback({
     };
   }, [recording.id, recording.blob]);
 
-  if (!url) return null;
+  if (!recording.blob || !url) return null;
 
   const isVideo = recording.blob.type.startsWith("video/");
   if (isVideo) {
