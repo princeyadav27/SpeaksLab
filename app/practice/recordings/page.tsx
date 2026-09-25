@@ -45,7 +45,9 @@ export default function MyRecordingsPage() {
     if (!selectedId) return;
     void getRecordingBlob(selectedId).then((blob) => {
       if (!blob) return;
-      setRecordings((current) => current?.map((item) => item.id === selectedId ? { ...item, blob } : item) ?? current);
+      // Keep media that is already loaded: swapping in a fresh copy on every
+      // re-selection made the player reload (and remount) for no reason.
+      setRecordings((current) => current?.map((item) => item.id === selectedId && !item.blob ? { ...item, blob } : item) ?? current);
     }).catch(() => setActionError("The recording media could not be loaded."));
   }, [selectedId]);
 
