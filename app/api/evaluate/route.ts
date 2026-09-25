@@ -196,7 +196,17 @@ function coerceModelEvaluation(raw: unknown): unknown {
       (scores as Record<string, unknown>)[key] = toInteger((scores as Record<string, unknown>)[key]);
     }
   }
-  return { ...value, overallScore: toInteger(value.overallScore), scores };
+  // Round the relevance score like every other score, so a decimal from the
+  // model (e.g. 85.5) is stored as an integer instead of failing validation
+  // and silently falling back to the heuristic evaluation.
+  const questionRelevance = typeof value.questionRelevance === "object" && value.questionRelevance !== null
+    ? { ...(value.questionRelevance as Record<string, unknown>) }
+    : value.questionRelevance;
+  if (questionRelevance && typeof questionRelevance === "object") {
+    const relevance = questionRelevance as Record<string, unknown>;
+    relevance.score = toInteger(relevance.score);
+  }
+  return { ...value, overallScore: toInteger(value.overallScore), questionRelevance, scores };
 }
 
 function clamp(value: number, min: number, max: number): number {
