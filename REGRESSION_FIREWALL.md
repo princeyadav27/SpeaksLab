@@ -111,6 +111,12 @@ returns `{ transcript, model }` on success and `{ error }` otherwise.
   `fake-indexeddb` (shared connection, save/delete after listing, media kept
   when metadata is saved without a blob, v1 → v2 migration). Extend it
   whenever you change this module.
+- **Saved evaluations are user data too.** `validateEvaluation` also decides
+  whether My Recordings *displays* an already-saved evaluation, so never make
+  it stricter than what older versions saved (e.g. older evaluations can hold a
+  decimal `questionRelevance.score`). Normalise new model output in the
+  evaluate route (`coerceModelEvaluation`) instead. Covered by
+  `tests/aiEvaluation.test.ts` and `tests/evaluateRoute.test.ts`.
 
 ## Env vars quick reference
 
