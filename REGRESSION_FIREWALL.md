@@ -91,6 +91,33 @@ returns `{ transcript, model }` on success and `{ error }` otherwise.
   `tests/transcriptionShared.test.ts` and `tests/transcribeBackend.test.ts`.
   Add tests whenever you change transcription logic.
 
+## Recordings storage (IndexedDB)
+
+`lib/recordingsDb.ts` stores recordings in the browser database
+`speaklab-recordings` (schema **version 2**):
+
+- `recordings` holds lightweight metadata only (listing, transcript, metrics,
+  evaluation); `recording-blobs` holds the media as `{ id, blob }`. The
+  My Recordings page lists metadata and lazy-loads the selected media with
+  `getRecordingBlob`.
+- Opening version 2 migrates version-1 data (blob embedded in each record)
+  into `recording-blobs`. Never lower `DB_VERSION`: users' browsers are already
+  on version 2, and a lower version fails to open.
+- **One connection is shared by every helper and must never be closed by a
+  helper.** A closed connection stays cached and every later call fails with
+  `InvalidStateError: The database connection is closing` (this shipped once:
+  saved videos stopped loading and saving/deleting failed).
+- **Tests**: `tests/recordingsDb.test.ts` runs the real module against
+  `fake-indexeddb` (shared connection, save/delete after listing, media kept
+  when metadata is saved without a blob, v1 → v2 migration). Extend it
+  whenever you change this module.
+- **Saved evaluations are user data too.** `validateEvaluation` also decides
+  whether My Recordings *displays* an already-saved evaluation, so never make
+  it stricter than what older versions saved (e.g. older evaluations can hold a
+  decimal `questionRelevance.score`). Normalise new model output in the
+  evaluate route (`coerceModelEvaluation`) instead. Covered by
+  `tests/aiEvaluation.test.ts` and `tests/evaluateRoute.test.ts`.
+
 ## Env vars quick reference
 
 | Var | Meaning |

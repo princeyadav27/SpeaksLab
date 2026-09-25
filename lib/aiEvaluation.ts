@@ -36,8 +36,12 @@ export type AIEvaluation = {
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
-function isIntInRange(value: unknown, min: number, max: number): boolean {
-  return typeof value === "number" && Number.isInteger(value) && Number.isFinite(value) && value >= min && value <= max;
+// Any finite number in range is accepted, not only integers. Evaluations
+// saved by earlier versions can hold a decimal questionRelevance.score (it was
+// never rounded); requiring integers hid those saved evaluations on My
+// Recordings. New model output is rounded in the evaluate route instead.
+function isScoreInRange(value: unknown, min: number, max: number): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -55,7 +59,7 @@ export function validateEvaluation(raw: unknown): AIEvaluation {
 
   const obj = raw as Record<string, unknown>;
 
-  if (!isIntInRange(obj.overallScore, 0, 100)) {
+  if (!isScoreInRange(obj.overallScore, 0, 100)) {
     throw new Error(`Invalid overallScore: ${String(obj.overallScore)}`);
   }
 
@@ -63,7 +67,7 @@ export function validateEvaluation(raw: unknown): AIEvaluation {
     throw new Error("Missing questionRelevance object.");
   }
   const relevance = obj.questionRelevance as Record<string, unknown>;
-  if (!isIntInRange(relevance.score, 0, 100)) throw new Error("Invalid question relevance score.");
+  if (!isScoreInRange(relevance.score, 0, 100)) throw new Error("Invalid question relevance score.");
   if (typeof relevance.addressed !== "boolean") throw new Error("questionRelevance.addressed must be boolean.");
   if (typeof relevance.explanation !== "string" || relevance.explanation.trim() === "") {
     throw new Error("questionRelevance.explanation must be a non-empty string.");
@@ -90,7 +94,7 @@ export function validateEvaluation(raw: unknown): AIEvaluation {
   ];
 
   for (const field of scoreFields) {
-    if (!isIntInRange(s[field], 0, 100)) {
+    if (!isScoreInRange(s[field], 0, 100)) {
       throw new Error(`Invalid score for ${field}: ${String(s[field])}`);
     }
   }
