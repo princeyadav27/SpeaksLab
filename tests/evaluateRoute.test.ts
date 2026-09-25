@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The route imports "@/lib/aiEvaluation"; map the alias to the real module.
 vi.mock("@/lib/aiEvaluation", () => import("../lib/aiEvaluation"));
 
+// The route now requires a signed-in user (Clerk). The auth mock defaults to
+// a signed-in session; the signed-out contract test flips it per test.
+const authState = vi.hoisted(() => ({ userId: "user_test" as string | null }));
+vi.mock("@clerk/nextjs/server", () => ({
+  auth: async () => ({ userId: authState.userId }),
+}));
+
 const requestBody = {
   category: "Geopolitics",
   challengeQuestion: "What is a supply chain, and why did everyone start caring about it in 2020?",
@@ -55,6 +62,9 @@ beforeEach(() => {
   vi.resetModules();
   vi.stubEnv("NVIDIA_API_KEY", "test-key");
   vi.stubEnv("NVIDIA_MODEL", "");
+  // The routes check isClerkConfigured() before consulting the mocked auth.
+  vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "pk_test_placeholder");
+  vi.stubEnv("CLERK_SECRET_KEY", "sk_test_placeholder");
   for (const method of ["log", "warn", "error"] as const) vi.spyOn(console, method).mockImplementation(() => {});
 });
 
@@ -65,6 +75,17 @@ afterEach(() => {
 });
 
 describe("POST /api/evaluate model output handling", () => {
+  it("returns the 401 error contract when the caller is signed out", async () => {
+    authState.userId = null;
+    try {
+      const { status, body } = await evaluate();
+      expect(status).toBe(401);
+      expect(typeof body.error).toBe("string");
+    } finally {
+      authState.userId = "user_test";
+    }
+  });
+
   it("keeps the AI evaluation when the model scores relevance with a decimal", async () => {
     // Regression: a relevance score such as 85.5 failed validation, so the
     // route discarded a good AI evaluation and returned the heuristic one.

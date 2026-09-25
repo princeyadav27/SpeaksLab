@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { Show, SignInButton, UserButton } from "@clerk/nextjs";
+import { clerkUiEnabled } from "@/lib/authFlags";
 
 function LogoMark({ className }: { className?: string }) {
   return (
@@ -44,7 +46,7 @@ export default function Navbar({ variant = "overlay" }: NavbarProps) {
           </span>
         </Link>
 
-        <div className="flex items-center gap-8 lg:gap-10">
+        <div className="flex items-center gap-4 lg:gap-6">
           <Link
             href="/practice/recordings"
             className={`rounded-lg border px-3.5 py-2 text-[13px] font-normal tracking-[0.01em] transition-colors ${
@@ -55,6 +57,30 @@ export default function Navbar({ variant = "overlay" }: NavbarProps) {
           >
             My Recordings
           </Link>
+          {/* Auth controls render only where Clerk is configured; without
+              keys the navbar stays exactly as it was before sign-in shipped. */}
+          {clerkUiEnabled ? (
+            <>
+              <Show when="signed-out">
+                <SignInButton>
+                  <button
+                    type="button"
+                    className={`rounded-lg px-3.5 py-2 text-[13px] font-medium transition-colors ${
+                      overlay
+                        ? "bg-ivory text-ink hover:bg-ivory/85"
+                        : "bg-cobalt text-ivory hover:bg-cobalt-deep"
+                    }`}
+                  >
+                    Sign in
+                  </button>
+                </SignInButton>
+              </Show>
+              <Show when="signed-in">
+                {/* Sign-out destination comes from NEXT_PUBLIC_CLERK_SIGN_OUT_FALLBACK_REDIRECT_URL. */}
+                <UserButton />
+              </Show>
+            </>
+          ) : null}
         </div>
       </nav>
     </header>

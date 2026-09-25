@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { currentUserId, isClerkConfigured } from "@/lib/authGate";
 import { validateGeneratedQuestion } from "@/lib/generatedQuestion";
 import { pickTopic } from "@/lib/topicEngine";
 import type { TopicDifficulty } from "@/lib/topics";
@@ -101,6 +102,19 @@ function getLocalQuestionFallback(categoryId: string, difficulty: TopicDifficult
 }
 
 export async function POST(request: Request) {
+  // Question generation is a paid API: only signed-in users may use it. The
+  // response shape matches the route's existing error contract.
+  if (!isClerkConfigured()) {
+    return NextResponse.json(
+      { error: "Accounts are not configured on this deployment. Add the Clerk keys (see README)." },
+      { status: 503 },
+    );
+  }
+  const userId = await currentUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Sign in to generate questions." }, { status: 401 });
+  }
+
   let body: GenerateRequest;
   try {
     body = (await request.json()) as GenerateRequest;

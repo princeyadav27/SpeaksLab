@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { currentUserId, isClerkConfigured } from "@/lib/authGate";
 import {
   AudioDecodeError,
   selectBackend,
@@ -38,6 +39,19 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // Transcription is a paid API: only signed-in users may use it. The
+  // response shape matches the route's existing error contract.
+  if (!isClerkConfigured()) {
+    return NextResponse.json(
+      { error: "Accounts are not configured on this deployment. Add the Clerk keys (see README)." },
+      { status: 503 },
+    );
+  }
+  const userId = await currentUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Sign in to transcribe recordings." }, { status: 401 });
+  }
+
   // Parse the multipart body separately: a malformed request is a client
   // error (400), not a missing-dependency server error (500).
   let formData: FormData;

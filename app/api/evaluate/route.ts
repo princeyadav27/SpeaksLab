@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { currentUserId, isClerkConfigured } from "@/lib/authGate";
 import { validateEvaluation, type AIEvaluation } from "@/lib/aiEvaluation";
 import type { SpeakingMetrics } from "@/lib/speakingMetrics";
 
@@ -287,6 +288,19 @@ function buildLocalEvaluationFallback(req: EvaluateRequest): AIEvaluation {
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
+  // Evaluation is a paid API: only signed-in users may use it. The response
+  // shape matches the route's existing error contract.
+  if (!isClerkConfigured()) {
+    return NextResponse.json(
+      { error: "Accounts are not configured on this deployment. Add the Clerk keys (see README)." },
+      { status: 503 },
+    );
+  }
+  const userId = await currentUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Sign in to get an AI evaluation." }, { status: 401 });
+  }
+
   // Parse and validate BEFORE the no-key early return. Otherwise a malformed
   // request was answered with a 200 and a fabricated local-fallback score,
   // and an empty transcript looked like a real evaluation.

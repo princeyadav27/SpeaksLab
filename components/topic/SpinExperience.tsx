@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { getCategories, getCategoryById } from "@/lib/categories";
 import {
   TYPE_LABELS,
@@ -25,6 +26,12 @@ import {
   deleteRecording,
   type SavedRecording,
 } from "@/lib/recordingsDb";
+import {
+  deleteCloudRecording,
+  saveRecordingMetadata,
+  uploadRecordingMedia,
+} from "@/lib/cloudRecordings";
+import { newRecordingId } from "@/lib/recordingPaths";
 import RecordingPlayback from "@/components/recordings/RecordingPlayback";
 import { transcribeRecording } from "@/lib/transcriptionClient";
 import {
@@ -92,6 +99,7 @@ function cubicBezierProgress(t: number) {
 }
 
 export default function SpinExperience() {
+  const { userId } = useAuth();
   const categories = useMemo(() => getCategories(), []);
   const stored = useSyncExternalStore(
     subscribeTopicChallenge,
@@ -123,6 +131,9 @@ export default function SpinExperience() {
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [transcribingRecordingId, setTranscribingRecordingId] = useState<string | null>(null);
   const [savedRecordings, setSavedRecordings] = useState<SavedRecording[]>([]);
+  // Recordings saved to the signed-in account during this session (vs. the
+  // device-only fallback), so deletes hit the right backend.
+  const cloudRecordingIdsRef = useRef<Set<string>>(new Set());
   const recordedPreviewUrlRef = useRef<string | null>(null);
   const spinFrameRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -836,7 +847,7 @@ export default function SpinExperience() {
       // it here makes the video/audio player disappear during transcription.
       // The recordingUrl effect and final cleanup revoke it after the flow ends.
 
-      const recordingId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const recordingId = newRecordingId();
 
       // Save recording without transcript first
       const recording: SavedRecording = {
@@ -854,8 +865,52 @@ export default function SpinExperience() {
         blob,
       };
 
-      await saveRecording(recording);
-      setSavedMessage("Recording saved locally. Transcribing...");
+      // Primary path: save the recording to the signed-in user's account
+      // (direct browser upload + a metadata document). Fallback path: the
+      // original local IndexedDB save, so a transient storage outage never
+      // loses a take.
+      let savedToCloud = false;
+      let cloudMedia: { url: string; pathname: string } | null = null;
+      if (userId) {
+        try {
+          const { url, pathname } = await uploadRecordingMedia(blob, {
+            userId,
+            recordingId,
+            onProgress: (percent) => {
+              setSavedMessage(percent < 100 ? `Uploading recording to your account… ${percent}%` : "Finalizing upload…");
+            },
+          });
+          cloudMedia = { url, pathname };
+          await saveRecordingMetadata({
+            id: recording.id,
+            topicId: recording.topicId,
+            topicName: recording.topicName,
+            challengeQuestion: recording.challengeQuestion,
+            categoryId: recording.categoryId,
+            categoryName: recording.categoryName,
+            difficulty: recording.difficulty,
+            prepMinutes: recording.prepMinutes,
+            notes: recording.notes,
+            durationSeconds: recording.durationSeconds,
+            createdAt: recording.createdAt,
+            mediaUrl: url,
+            mediaPathname: pathname,
+            mediaSize: blob.size,
+            mediaContentType: blob.type || undefined,
+          });
+          savedToCloud = true;
+          cloudRecordingIdsRef.current.add(recordingId);
+        } catch {
+          savedToCloud = false;
+        }
+      }
+
+      if (savedToCloud) {
+        setSavedMessage("Recording saved to your account. Transcribing...");
+      } else {
+        await saveRecording(recording);
+        setSavedMessage("Recording saved on this device only. Transcribing...");
+      }
       setSavedRecordings((current) => [recording, ...current]);
       setTranscribingRecordingId(recording.id);
 
@@ -871,13 +926,38 @@ export default function SpinExperience() {
             ...recording,
             transcript: transcript.trim(),
           };
-          await saveRecording(updatedRecording);
+          if (savedToCloud && cloudMedia) {
+            await saveRecordingMetadata({
+              id: updatedRecording.id,
+              topicId: updatedRecording.topicId,
+              topicName: updatedRecording.topicName,
+              challengeQuestion: updatedRecording.challengeQuestion,
+              categoryId: updatedRecording.categoryId,
+              categoryName: updatedRecording.categoryName,
+              difficulty: updatedRecording.difficulty,
+              prepMinutes: updatedRecording.prepMinutes,
+              notes: updatedRecording.notes,
+              durationSeconds: updatedRecording.durationSeconds,
+              createdAt: updatedRecording.createdAt,
+              transcript: updatedRecording.transcript,
+              mediaUrl: cloudMedia.url,
+              mediaPathname: cloudMedia.pathname,
+              mediaSize: blob.size,
+              mediaContentType: blob.type || undefined,
+            });
+          } else {
+            await saveRecording(updatedRecording);
+          }
           setSavedRecordings((current) =>
             current.map((item) => item.id === updatedRecording.id ? updatedRecording : item),
           );
-          setSavedMessage("Recording and transcript saved.");
+          setSavedMessage(savedToCloud
+            ? "Recording and transcript saved to your account."
+            : "Recording and transcript saved on this device.");
         } else {
-          setSavedMessage("Recording saved, but transcription returned no speech.");
+          setSavedMessage(savedToCloud
+            ? "Recording saved to your account, but transcription returned no speech."
+            : "Recording saved, but transcription returned no speech.");
         }
       } catch (transcriptionError) {
         const message =
@@ -900,7 +980,12 @@ export default function SpinExperience() {
 
   async function handleDeleteRecording(id: string) {
     try {
-      await deleteRecording(id);
+      if (cloudRecordingIdsRef.current.has(id)) {
+        await deleteCloudRecording(id);
+        cloudRecordingIdsRef.current.delete(id);
+      } else {
+        await deleteRecording(id);
+      }
       setSavedRecordings((current) => current.filter((recording) => recording.id !== id));
     } catch {
       setRecordError("The recording could not be deleted.");
